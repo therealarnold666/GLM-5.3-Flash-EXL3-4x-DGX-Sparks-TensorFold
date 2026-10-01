@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 2debdad..2c20f11 100644
+index 116000f..946e2d6 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
-@@ -521,14 +521,24 @@ def serial_decode(e: Engine, pending: int, count: int, sampling: Sampling | None
+@@ -552,14 +552,24 @@ def serial_decode(e: Engine, pending: int, count: int, sampling: Sampling | None
  
  
  class DepthPolicy:
@@ -29,7 +29,7 @@ index 2debdad..2c20f11 100644
      def next(self, drafted: int, accepted: int) -> int:
          if self.fixed:
              return self.most
-@@ -644,7 +654,8 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
+@@ -675,7 +685,8 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
          if copied:
              drafts = copied
          else:
@@ -40,7 +40,7 @@ index 2debdad..2c20f11 100644
          tokens = e.verify_window([out[-1]] + drafts)
          drafts = tokens[1:]
 diff --git tensorfold/families/glm5_next/cuda/dflash2.py tensorfold/families/glm5_next/cuda/dflash2.py
-index 427d7f6..9e5aece 100644
+index 62c9373..25947bb 100644
 --- tensorfold/families/glm5_next/cuda/dflash2.py
 +++ tensorfold/families/glm5_next/cuda/dflash2.py
 @@ -21,6 +21,31 @@ from .weights import Weights
@@ -75,7 +75,7 @@ index 427d7f6..9e5aece 100644
  
  
  @triton.jit
-@@ -444,8 +469,12 @@ class Drafter:
+@@ -464,8 +489,12 @@ class Drafter:
          return tokens, values, proj.numpy().astype(np.float64)          # astype copies: nothing keeps cand_host
  
      def chain(self, tokens: np.ndarray, values: np.ndarray, proj: np.ndarray, anchor: int, first: int,
@@ -90,7 +90,7 @@ index 427d7f6..9e5aece 100644
  
          depth = tokens.shape[0]
          sampled = sampling is not None and sampling.temperature > 0
-@@ -453,27 +482,44 @@ class Drafter:
+@@ -473,27 +502,44 @@ class Drafter:
          noise = None
          if sampled:
              noise = -np.log(-np.log(uniform_rows(sampling.seed, first + np.arange(depth), tokens)))
@@ -139,10 +139,10 @@ index 427d7f6..9e5aece 100644
 +                              round_ms=round_ms)
          return self.chain(tokens, values, proj, pending, self.context_end + 1, sampling, confidence)
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index ddb968f..f50b3a1 100644
+index c4b826e..b626ecf 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -149,11 +149,16 @@ def user_opener(model_dir: Path) -> int | None:
+@@ -151,11 +151,16 @@ def user_opener(model_dir: Path) -> int | None:
  
  
  def encode_policy(spec: str) -> list[int]:
@@ -161,7 +161,7 @@ index ddb968f..f50b3a1 100644
      try:
          if spec == "auto" or spec.startswith("auto:"):
              parts = spec.split(":")
-@@ -163,6 +168,8 @@ def encode_policy(spec: str) -> list[int]:
+@@ -165,6 +170,8 @@ def encode_policy(spec: str) -> list[int]:
              if explore < 1 or every < 0 or not 0 <= margin < 1:
                  raise bad
              return [4 if len(parts) == 1 else 5, explore, every, int(round(margin * 1e6))]
@@ -170,7 +170,7 @@ index ddb968f..f50b3a1 100644
          if spec.startswith("f"):
              code = encode_policy(spec[1:])
              return [code[0] + 10] + code[1:] if code[0] else code
-@@ -186,8 +193,30 @@ def encode_policy(spec: str) -> list[int]:
+@@ -188,8 +195,30 @@ def encode_policy(spec: str) -> list[int]:
      return [1 if most > 0 else 0, most, 0, 0]
  
  
@@ -203,7 +203,7 @@ index ddb968f..f50b3a1 100644
  
      from .decode import DepthPolicy
  
-@@ -199,9 +228,22 @@ def decode_policy(code: list[int]):
+@@ -201,9 +230,22 @@ def decode_policy(code: list[int]):
          return DepthPolicy(min(most, MAX_ROWS - 1), low=a / 1e6, high=b / 1e6)
      if kind == 3:
          return DepthPolicy(min(most, MAX_ROWS - 1), fixed=True, confidence=a / 1e6)
@@ -226,7 +226,7 @@ index ddb968f..f50b3a1 100644
  def _f64_ints(x: float) -> list[int]:
      return list(struct.unpack("<2i", struct.pack("<d", float(x))))
  
-@@ -674,7 +716,7 @@ class GlmEngine:
+@@ -738,7 +780,7 @@ class GlmEngine:
          on_tokens([first])
          if max_tokens <= 1 or (stop_eos and first in self.eos):
              return stats

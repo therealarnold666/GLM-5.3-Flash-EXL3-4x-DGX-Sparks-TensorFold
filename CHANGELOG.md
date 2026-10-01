@@ -3,6 +3,44 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.3 (2026-10-01): TensorFold v0.6.0, issue fixes #2 and #6, whole tool calls
+
+Image `v0.6.0-ae8d1c789b47` (`sha256:22789f0cb3dc308f0b2ce52a33961b88bd624af1725e91e8aba0a74a671bb969`), 53 patches.
+
+### Changed
+- **TensorFold v0.6.0** (was v0.5.0). The patches are rebased onto it. Three of ours are now part of TensorFold
+  itself and were dropped: the idle doorbell, `TENSORFOLD_MEMORY_RESERVE_GIB` and `TF_GLM_MTP`. The others keep
+  their names, renumbered (0024 -> 0023 ... 0053 -> 0050; the README's patch table lists them). TensorFold is
+  Apache-2.0 from v0.6.0; `NOTICE` and `CREDITS.md` say so.
+- `TF_GLM_MTP=auto` is now set explicitly: v0.6.0's own default (`1`) would load the MTP head (1.77 GiB a Spark)
+  with `PARALLEL=1`.
+- **Default reply budget 4,096 -> 32,768 tokens** (`MAX_TOKENS`) for a request that sets no `max_tokens`, as agents
+  such as Codex do. GLM thinks at Max by default and could run out of budget inside a tool call. A request's own
+  value still wins; the default is cut to what the window has left, never refused.
+- **Compiled kernels are kept per image** (`~/.cache/tensorfold-glm53/<image hash>`): another image's build of the
+  same extension can no longer be loaded by mistake. A new image compiles once (a few minutes on its first start).
+- From v0.6.0 itself: `reasoning_effort: "medium"` is heard as `high`; `logprobs`, `top_logprobs` and `n` other than
+  1 get HTTP 400 (they were ignored).
+
+### Fixed
+- **#6, `COMM=roce` first start dying at the first all-gather.** On a first start each rank builds its CUDA kernels on
+  its own and could drift past the ~20 s a RoCE wait allows. Until startup is over, each RoCE gather first waits for
+  the peer in an NCCL barrier; the RoCE kernel builds during setup. New `TF_ROCE_WAIT_S` (default 20 s); a failure
+  now prints the proxy's counters. Patch `0052-cuda-roce-startup`.
+- **#2, one malformed tool call in the history blocking a conversation for good.** A past tool call whose arguments
+  are not a JSON object is left out of the prompt with its result, and logged, instead of HTTP 400 on every later
+  turn. Patch `0051-glm-tool-history-recovery`.
+- **Cut-off tool calls are never sent.** A tool call now goes out whole once it is written; a reply that ends inside
+  a call (its token limit) ends with `length` and never sends that call, streamed or not, so a client cannot store
+  or run cut arguments. While a call is written, an empty delta goes out every 2 s for clients with an idle timeout.
+  Patch `0053-glm-whole-tool-calls`.
+
+### Unchanged
+- Replies: the exactness checks (reference shas, drafted == serial 6/6, concurrency 22/22, images and videos, tool
+  calls) equal v1.2's. Prefill speed is unchanged (sparkDash, 8k-256k).
+- Memory: KV pool **2,922,496 tokens** at the measured start (the 12.5 GiB cap); lowest free memory under a 1M-token
+  prompt 5.6 GiB on the head, 9.5 GiB on the worker (needle found).
+
 ## v1.2 (2026-10-01): bigger KV pool, worker weights over NFS
 
 Image unchanged: `v0.5.0-cb7c56f7f921` (`sha256:6ee3c6e0430040b69ddcb0c96c7fbbcb94a5bed47d48a8ba092626369ae533b9`),

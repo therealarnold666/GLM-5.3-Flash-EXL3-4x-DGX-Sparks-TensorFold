@@ -38,7 +38,7 @@ MODEL_ID="${MODEL_ID:-Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw}"   # EXL3 routed ex
 # belongs to the default MODEL_ID; another MODEL_ID gets no pin unless you set one.
 _rev=""; [[ "$MODEL_ID" == Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw ]] && _rev=9eaebb7c4e96d983dcd538e18624622ba5b820a8
 MODEL_REVISION="${MODEL_REVISION-$_rev}"
-TF_VERSION="${TF_VERSION:-v0.5.0}"
+TF_VERSION="${TF_VERSION:-v0.6.0}"
 TF_REPO="${TF_REPO:-https://github.com/ashhart/TensorFold.git}"
 BASE_IMAGE="${BASE_IMAGE:-nvcr.io/nvidia/pytorch:26.07-py3}"
 IMAGE="${IMAGE:-tensorfold-glm53:${TF_VERSION}}"
@@ -50,8 +50,8 @@ GHCR_IMAGE="${GHCR_IMAGE:-ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-ten
 # The published image of this release's patches, pinned: prepare.sh pulls it by digest (a tag can be moved, a digest
 # cannot) while patches/*.patch and IMAGE_EXTRAS still hash to IMAGE_TAG's hash. Other patches pull
 # $GHCR_IMAGE:<TF_VERSION>-<hash> when one is published, else build locally. scripts/publish-image.sh prints both.
-IMAGE_TAG="${IMAGE_TAG:-v0.5.0-cb7c56f7f921}"
-IMAGE_DIGEST="${IMAGE_DIGEST:-sha256:6ee3c6e0430040b69ddcb0c96c7fbbcb94a5bed47d48a8ba092626369ae533b9}"
+IMAGE_TAG="${IMAGE_TAG:-v0.6.0-ae8d1c789b47}"
+IMAGE_DIGEST="${IMAGE_DIGEST:-sha256:22789f0cb3dc308f0b2ce52a33961b88bd624af1725e91e8aba0a74a671bb969}"
 # the registry reference prepare.sh pulls for these patches: the pinned digest, or the hash's tag
 prebuilt_image() {
   local tag="${TF_VERSION}-$(image_hash)"
@@ -64,19 +64,22 @@ HOST="${HOST:-0.0.0.0}"
 PORT="${PORT:-8888}"
 DRAFTER="${DRAFTER:-dflash2}"        # dflash2: incoai/GLM-5.3-Flash-DFlash2 drafts (CC BY-NC-ND 4.0: non-commercial
                                      # use only), +5-10% decode over mtp; mtp: the checkpoint's own MTP head
+# The checkpoint's MTP head beside DFlash2 (TensorFold's TF_GLM_MTP): auto (default) leaves it out while DFlash2
+# drafts every request; TensorFold v0.6.0's own default, 1, would load it (1.77 GiB a Spark) with PARALLEL=1.
+export TF_GLM_MTP="${TF_GLM_MTP:-auto}"
 # Image and video input (rank 0 runs GLM's vision tower: 1.05 GiB of bf16 weights and 0.75 GiB of workspace). A picture
 # takes at most TENSORFOLD_GLM_IMAGE_TOKENS tokens (2048), a clip TENSORFOLD_GLM_VIDEO_TOKENS (16384) over at most
 # TENSORFOLD_GLM_VIDEO_FRAMES frames (128, 2 a second). VISION_URLS=1 also accepts public https URLs (default: data URLs).
 VISION="${VISION:-1}"
 VISION_URLS="${VISION_URLS:-0}"
-# Concurrent requests (patches 0028-0033, 0038, 0043, 0044: one shared pool of per-token caches, one batched verify window
+# Concurrent requests (patches 0026-0030, 0035, 0040, 0041: one shared pool of per-token caches, one batched verify window
 # a round): 1 to 4, with DRAFTER=dflash2 only (mtp: 1). 4 (default), prose in all (sparkDash): 60.4 / 79.2 / 89.5 /
 # 108.8 tok/s at 1 / 2 / 3 / 4 at once; structured 114.7 / 147.6 / 196.3 / 227.9.
 if [[ "$DRAFTER" == dflash2 ]]; then _par=4; else _par=1; fi
 PARALLEL="${PARALLEL:-$_par}"
-# The DSA latent cache and the indexer's pooled keys (patch 0041): fp8 (default) holds them as e4m3 rows with a
+# The DSA latent cache and the indexer's pooled keys (patch 0038): fp8 (default) holds them as e4m3 rows with a
 # power-of-two scale each, half bf16's bytes: the 1M-token window with 4 streams fits (rank 0: 88.09 GiB estimated,
-# pool 2,852,864 tokens at the measured start). Lossy: GSM8K 98.0%, HumanEval 97.6%, 1M needle found; drafted replies still equal serial
+# pool 2,922,496 tokens at the measured start). Lossy: GSM8K 98.0%, HumanEval 97.6%, 1M needle found; drafted replies still equal serial
 # ones. bf16: the exact cache (~196k tokens with DFlash2).
 KV="${KV:-fp8}"
 export TF_GLM_KV="$KV"
@@ -92,6 +95,10 @@ DFLASH2_ID="${DFLASH2_ID:-incoai/GLM-5.3-Flash-DFlash2}"
 _rev=""; [[ "$DFLASH2_ID" == incoai/GLM-5.3-Flash-DFlash2 ]] && _rev=bf582e4eacc1810f76656d1811693ff6c6737d2a
 DFLASH2_REVISION="${DFLASH2_REVISION-$_rev}"   # DFlash2's pinned revision, as MODEL_REVISION above
 THINKING="${THINKING:-1}"
+# The reply budget of a request that sets no max_tokens (or max_completion_tokens), reasoning and answer together:
+# 32768. GLM thinks at Max by default, and TensorFold's own 4,096 could end a reply inside a tool call (an agent such
+# as Codex sets none). A request's own value wins; this one is cut to what the window has left, never refused.
+MAX_TOKENS="${MAX_TOKENS:-32768}"
 # The checkpoint's BF16 weights (attention, shared experts, dense layers, head: ~9.7 GiB a Spark):
 #   q4 (default): the projections as affine 4-bit groups of 64 with MSE-searched ranges, the head and kv_b in FP8
 #        (patches 0002, 0005). Over fp8 (DFlash2, one boot each): prose 38.9 -> 44.4 tok/s, code 44.2 -> 48.7, prefill
@@ -124,35 +131,35 @@ DRAFT_POLICY="${DRAFT_POLICY:-fnc7:0.3}"
 export TF_GLM_DFLASH_POLICY="$DRAFT_POLICY"
 # Prompt chunks' hyper-connection glue split by rows between the two Sparks, its exchanges overlapped with the next
 # rows' work (patch 0010): prefill ~1,270 -> ~1,730 tok/s on a 50k prompt (with patches 0009 and 0020); decode rounds
-# pay ~1.5%. The overlap also runs the next block's front on its own rows during the exchanges (patch 0036; with
+# pay ~1.5%. The overlap also runs the next block's front on its own rows during the exchanges (patch 0033; with
 # COPY_CODE below, two boots each: a 149k prompt 92.8 -> 90.7 s). Same bits. SPLIT=0 turns it off.
 SPLIT="${SPLIT:-1}"
 export TF_GLM_HC_SPLIT="$SPLIT" TF_GLM_PREFILL_OVERLAP="$([[ "$SPLIT" == 1 ]] && echo 2 || echo 0)"
-# KDA prompt chunks in chunked (WY) form, one CUDA kernel of 32-row sub-chunks (patches 0012, 0014, 0042): prefill
+# KDA prompt chunks in chunked (WY) form, one CUDA kernel of 32-row sub-chunks (patches 0012, 0014, 0039): prefill
 # 50k 29.3 -> 26.4 s, 149k 91.1 -> 84.5 s (one boot each); prompt states then sit on a 64-token grid.
 # Close to the serial kernel, not its bits: prompt arithmetic differs, drafted replies still equal serial ones. 0: off.
 KDA_CHUNKED="${KDA_CHUNKED:-1}"
 export TF_GLM_KDA_CHUNKED="$KDA_CHUNKED"
-# Code-workload copy drafts (patch 0035): 16-row verify windows as CUDA graphs, and a copy from the reply itself only
+# Code-workload copy drafts (patch 0032): 16-row verify windows as CUDA graphs, and a copy from the reply itself only
 # when its last 16 tokens match: code 55.4 -> 56.2 tok/s, edit 120 -> 125 (with the overlap above, two boots each).
 # Exact. 0: off.
 COPY_CODE="${COPY_CODE:-1}"
 _w=0; [[ "$COPY_CODE" == 1 ]] && _w=16
 export TF_GLM_WIDE_GRAPHS="$_w" TF_GLM_COPY_REPLY_MATCH="$_w"
-# --parallel: a request alone runs on the one-stream graphs (patch 0038; 1, default) instead of the batched ones (0):
+# --parallel: a request alone runs on the one-stream graphs (patch 0035; 1, default) instead of the batched ones (0):
 # +0.6-0.9% at 1 stream (two boots each); replies served together still equal the same requests served alone. Exact.
 export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-1}"
-# Waiting prompts filled together in one forward (patch 0052): shared work (expert weights, glue, projections) runs once
+# Waiting prompts filled together in one forward (patch 0049): shared work (expert weights, glue, projections) runs once
 # for every waiting prompt, attention per prompt on its own state, so each gets the bits it gets alone. sparkDash, prose at
 # 4 at once: 103.4 -> 108.8 tok/s, time to first token 590 -> 340 ms; structured at 3 / 4 at once: 175.2 -> 196.3 and
 # 196.3 -> 227.9 tok/s; one request unchanged. Exact. MULTI_PREFILL=0 turns it off.
 MULTI_PREFILL="${MULTI_PREFILL:-1}"
 export TF_GLM_MULTI_PREFILL="$MULTI_PREFILL"
-# L2 prefetch in decode windows (patch 0049, adapted from jayleaton/glm53-tensorfold-spark's patch 0460): a side stream
+# L2 prefetch in decode windows (patch 0046, adapted from jayleaton/glm53-tensorfold-spark's patch 0460): a side stream
 # brings the weights the next kernels read into L2 during each layer's all-gathers. 1 (default): one request's prose
 # 48.36 -> 49.46 tok/s, code 59.54 -> 61.08 (two boots each). Same bits. 0: off.
 export TF_GLM_L2PF="${TF_GLM_L2PF:-1}"
-# The decode expert kernel's trellis loads (patch 0050, adapted from jayleaton/glm53-tensorfold-spark's patch 0580): nc
+# The decode expert kernel's trellis loads (patch 0047, adapted from jayleaton/glm53-tensorfold-spark's patch 0580): nc
 # (default) as 16-byte non-coherent loads a k step ahead: prose 48.36 -> 48.78 tok/s, code 59.54 -> 60.42 on their own.
 # Together with TF_GLM_L2PF=1 and TF_ROCE_MAX_KB=512: one request's prose 49.68, code 61.49 (+2.7% / +3.3%); 4 at once
 # prose 74.8 -> 76.6, code 100.0 -> 102.7 tok/s in all (two boots each). Same bits. 0: TensorFold's 32-bit loads.
@@ -166,8 +173,8 @@ export TF_GLM_SHARED_PREFIX="$SHARED_PREFIX"
 # (TENSORFOLD_MEMORY_RESERVE_GIB), capped at KV_POOL_GIB (its TF_GLM_CACHE_GIB). The server uses about 10 GiB more than
 # its own estimate at its peak (a 1M-token prompt), so the reserve sets the lowest free memory on the head: 14.5 leaves
 # about 4.5 GiB there, and the pool comes out at ~2.1-2.9M tokens depending on what is free at start. TensorFold's own
-# defaults (a tenth of RAM, ~12.2; 3 GiB: pool 1,411,072 tokens) leave ~14 GiB. Raise the reserve if other work
-# shares the Sparks' memory.
+# defaults (a tenth of RAM, ~12.2; 3 GiB: pool 1,411,072 tokens) leave more. Raise the reserve if other work shares
+# the Sparks' memory.
 MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-14.5}"
 export TENSORFOLD_MEMORY_RESERVE_GIB="$MEMORY_RESERVE_GIB"
 KV_POOL_GIB="${KV_POOL_GIB:-12.5}"
@@ -184,7 +191,7 @@ WORKER_WEIGHTS="${WORKER_WEIGHTS:-copy}"
 NFS_PATH="${NFS_PATH:-$HF_CACHE}"
 NFS_SERVER="${NFS_SERVER:-}"
 NFS_VOLUME="${NFS_VOLUME:-glm53-hf}"
-KERNEL_CACHE="${KERNEL_CACHE:-$HOME/.cache/tensorfold-glm53}"   # compiled CUDA kernels (written by the containers)
+KERNEL_CACHE="${KERNEL_CACHE:-$HOME/.cache/tensorfold-glm53}"   # compiled CUDA kernels, a folder per image's patches hash
 STATE_DIR="${STATE_DIR:-$HOME/.local/state/glm53-tensorfold}"   # this recipe's locks and setup marker
 # Free disk prepare.sh asks for before it downloads or copies: the checkpoint (~176 GB) under HF_CACHE (on the worker,
 # the copy is checked against its size instead), and an image build or copy (~25 GB) under Docker's root on each Spark;

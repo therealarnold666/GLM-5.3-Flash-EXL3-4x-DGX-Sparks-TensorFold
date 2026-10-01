@@ -1,5 +1,5 @@
 diff --git tensorfold/cuda/comm.py tensorfold/cuda/comm.py
-index 31a92c1..eb7aa10 100644
+index 2e50cdc..b94a2ce 100644
 --- tensorfold/cuda/comm.py
 +++ tensorfold/cuda/comm.py
 @@ -1,4 +1,5 @@
@@ -21,9 +21,9 @@ index 31a92c1..eb7aa10 100644
          self.store = TCPStore(master, port, world, rank == 0, timeout=timedelta(seconds=600))
          uid = _UniqueId()
          if rank == 0:
-@@ -72,6 +78,25 @@ class NCCL:
-         self._check(self.lib.ncclAllGather(send.data_ptr(), recv.data_ptr(), send.numel(), _DTYPES[send.dtype],
-                                            self.comm, stream))
+@@ -97,6 +103,25 @@ class NCCL:
+             print(f"[tensorfold] rank {self.rank} finished {label}; waiting for rank {missing} ({waited:.0f} s)",
+                   flush=True)
  
 +    def exchange(self, sends: list[torch.Tensor], recvs: list[torch.Tensor], peer: int) -> None:
 +        """One NCCL group on the current stream: every ``sends[i]`` to ``peer`` and ``recvs[i]`` from it (contiguous
@@ -48,7 +48,7 @@ index 31a92c1..eb7aa10 100644
          x = torch.zeros((1,), dtype=torch.float32, device="cuda")
          y = torch.zeros((self.world,), dtype=torch.float32, device="cuda")
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index fdc7c53..0591d9f 100644
+index b16ad04..c75f90c 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -84,8 +84,9 @@ class Engine:
@@ -75,10 +75,10 @@ index fdc7c53..0591d9f 100644
          self.st = State(w, capacity, max_rows)
          self.last_hidden: torch.Tensor | None = None
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 63c5dd2..4c06a8a 100644
+index b508ba0..3c2b10e 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -136,9 +136,11 @@ class GlmEngine:
+@@ -160,9 +160,11 @@ class GlmEngine:
  
      def __init__(self, model_dir: Path, *, rank: int, master: str, port: int, policy: str = DEFAULT_POLICY,
                   drafter: Path | None = None, context: int | None = None, context_explicit: bool | None = None, serial_only: bool = False, comm=None,
@@ -92,7 +92,7 @@ index 63c5dd2..4c06a8a 100644
  
          import torch
  
-@@ -155,6 +157,11 @@ class GlmEngine:
+@@ -180,6 +182,11 @@ class GlmEngine:
          # TF_GLM_COPY_DRAFTS=1: a reply that repeats earlier text drafts its continuation (prompt lookup) ahead of
          # the MTP head and DFlash2; both ranks must agree, so the settings join the startup comparison below
          self.copy = None if serial_only else CopySettings.from_env(MAX_ROWS - 1)
@@ -104,27 +104,28 @@ index 63c5dd2..4c06a8a 100644
          torch.cuda.set_device(0)
          self.torch = torch
          self.rank = rank
-@@ -216,7 +223,7 @@ class GlmEngine:
+@@ -247,7 +254,7 @@ class GlmEngine:
          long_context = self.limit > cfg.dense_limit
          # both ranks must run the same calls: refuse to start when they were given different settings
          mine = [int(drafter is not None), capacity, int(long_context), int(serial_only), int(LATENT),
--                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0])
-+                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code()
+-                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + \
++                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code() + \
+             [int(self.mtp_on), int(DRAFT_RING)]
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
-         wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -224,7 +231,8 @@ class GlmEngine:
+@@ -256,8 +263,8 @@ class GlmEngine:
          both = self._gather_ints(mine + [spare >> 20])
          if both[0][:-1] != both[1][:-1]:
              raise RuntimeError("the two ranks were started with different settings (draft model, context, drafts, "
--                               "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_COPY_*): "
+-                               "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_COPY_*, TF_GLM_MTP, "
+-                               "TF_GLM_DRAFT_RING): "
 +                               "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_COPY_*, "
-+                               "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES): "
++                               "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
                                 "(or pass --drafter none to both) and give both the same flags")
          self.cache_bytes = min(both[0][-1], both[1][-1]) << 20
-@@ -249,7 +257,11 @@ class GlmEngine:
-             self.drafter = Drafter(drafter, w, capacity=capacity)
+@@ -287,7 +294,11 @@ class GlmEngine:
+             self.drafter = Drafter(drafter, w, capacity=capacity, ring=DRAFT_RING)
          self.e = Engine(w, capacity=capacity, max_rows=MAX_ROWS, prefill_rows=prefill_rows, graphs=True, graph_rows=GRAPH_ROWS,
                          long_context=long_context, taps=self.drafter.tap_layers if self.drafter is not None else (),
 -                        grid=self.grid)
@@ -137,10 +138,10 @@ index 63c5dd2..4c06a8a 100644
              print(f"[tensorfold] prompt chunks and kept prompt states on a {self.grid}-token grid "
                    f"(TF_GLM_PROMPT_GRID)", flush=True)
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index 6c81ba8..dfd613b 100644
+index a961a94..98ed9e6 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -121,6 +121,8 @@ class Buffers:
+@@ -123,6 +123,8 @@ class Buffers:
          self.tap_at: dict[int, list[int]] = {}
          self.experts = c.experts
          self.top_k = c.top_k
@@ -149,7 +150,7 @@ index 6c81ba8..dfd613b 100644
  
      def set_taps(self, layers: tuple[int, ...], hidden: int) -> None:
          self.tap_at = {}
-@@ -242,9 +244,27 @@ def mm(b: Buffers, x: torch.Tensor, q, xs: torch.Tensor | None, out: torch.Tenso
+@@ -244,9 +246,27 @@ def mm(b: Buffers, x: torch.Tensor, q, xs: torch.Tensor | None, out: torch.Tenso
      return qmm.matmul(x, q, xs, out=out, f32=f32, part=b.sk)
  
  
@@ -180,7 +181,7 @@ index 6c81ba8..dfd613b 100644
  
  
  def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int) -> torch.Tensor:
-@@ -388,26 +408,48 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -406,26 +426,48 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
          with prof.timed("moe: routed (exl3)"):
              exl3_mm.routed(b.normed[:R], b.pick, b.plan, m.experts, b.exl3, b.ey.view(-1, c.hidden), R, c.limit)
          s = m.shared
@@ -245,7 +246,7 @@ index 6c81ba8..dfd613b 100644
  
  
  def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch: int | None = None,
-@@ -417,24 +459,43 @@ def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch:
+@@ -435,24 +477,43 @@ def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch:
      h = layer.attn_hc
      glue.hc_pre(x, h.fn, h.base, h.scale, layer.in_norm, b.normed[:R], b.xs[:R], b.post[:R], b.comb[:R],
                  b.hcpart[:R], c.eps, c.hc_eps, c.hc_iters, prompt=b.prefill)
@@ -299,7 +300,7 @@ index 6c81ba8..dfd613b 100644
  def check_room(w: Weights, st: State, R: int, pos: int | None = None) -> None:
      pos = st.pos if pos is None else pos
      if pos + R > w.cfg.dense_limit and st.index is None:
-@@ -467,11 +528,14 @@ def compute(w: Weights, st: State, b: Buffers, R: int, *, logits: bool = True, n
+@@ -485,11 +546,14 @@ def compute(w: Weights, st: State, b: Buffers, R: int, *, logits: bool = True, n
      if inject is not None:
          rows, features = inject
          b.x.index_copy_(0, rows, features.repeat(1, c.streams))

@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/sparse.py tensorfold/families/glm5_next/cuda/sparse.py
-index bc5362a..36d697a 100644
+index ea3ade3..bfdbf40 100644
 --- tensorfold/families/glm5_next/cuda/sparse.py
 +++ tensorfold/families/glm5_next/cuda/sparse.py
-@@ -125,12 +125,14 @@ def _scores(QI, W, w_stride, PK, PKS, OUT, POS, R, NP, scale, wscale, H: tl.cons
+@@ -135,12 +135,14 @@ def _scores(QI, W, w_stride, PK, PKS, OUT, POS, R, NP, scale, wscale, H: tl.cons
  @triton.jit
  def _scores_rows(QI, W, w_stride, PK, PKS, OUT, o_stride, POS, SPR, BASE, R, NP, scale, wscale, H: tl.constexpr,
                   HP: tl.constexpr, D: tl.constexpr, BP: tl.constexpr, G: tl.constexpr, SEG: tl.constexpr,
@@ -21,7 +21,7 @@ index bc5362a..36d697a 100644
  
      r = tl.program_id(0)
      g = tl.program_id(1)
-@@ -143,7 +145,7 @@ def _scores_rows(QI, W, w_stride, PK, PKS, OUT, o_stride, POS, SPR, BASE, R, NP,
+@@ -153,7 +155,7 @@ def _scores_rows(QI, W, w_stride, PK, PKS, OUT, o_stride, POS, SPR, BASE, R, NP,
      else:
          npool = (tl.load(POS) + r + 1) // 4
          pbase = tl.zeros((), tl.int64)
@@ -30,11 +30,11 @@ index bc5362a..36d697a 100644
      if g >= nb:
          return
      d = tl.arange(0, D)
-@@ -191,11 +193,16 @@ def _order_key(s):
+@@ -201,21 +203,25 @@ def _order_key(s):
  
  
  @triton.jit
--def _select_rows(S, OUT, NP, K: tl.constexpr, BLOCK: tl.constexpr):
+-def _select_rows(S, OUT, NP, POS, K: tl.constexpr, BLOCK: tl.constexpr, VISIBLE: tl.constexpr):
 -    """Program r: a radix select (8 bits a pass) finds the K-th best score, then one pass in pool order writes the pools above it and the lowest ties."""
 +def _select_rows(S, OUT, NPS, POS, K: tl.constexpr, BLOCK: tl.constexpr, VIS: tl.constexpr):
 +    """Program r: a radix select (8 bits a pass) finds the K-th best score, then one pass in pool order writes the pools above it and the lowest ties.
@@ -42,6 +42,7 @@ index bc5362a..36d697a 100644
  
      r = tl.program_id(0).to(tl.int64)
 -    row = S + r * NP
+-    limit = tl.minimum(NP, tl.maximum(K, (tl.load(POS) + r + 1) // 4)) if VISIBLE else NP
 +    row = S + r * NPS
 +    if VIS:
 +        NP = _visible_bound(NPS, tl.load(POS), r, K)
@@ -50,11 +51,34 @@ index bc5362a..36d697a 100644
      bins = tl.arange(0, 256)
      prefix = tl.zeros((), dtype=tl.uint32)
      fixed = tl.zeros((), dtype=tl.uint32)
-@@ -227,18 +234,32 @@ def _select_rows(S, OUT, NP, K: tl.constexpr, BLOCK: tl.constexpr):
+     need = K
+     for p in tl.static_range(4):
+         hist = tl.zeros((256,), dtype=tl.int32)
+-        for c in range(0, limit, BLOCK):
++        for c in range(0, NP, BLOCK):
+             i = c + tl.arange(0, BLOCK)
+-            ok = i < limit
++            ok = i < NP
+             u = _order_key(tl.load(row + i, mask=ok, other=0.0))
+             match = ok & ((u & fixed) == prefix)
+             hist += tl.histogram(((u >> (24 - 8 * p)) & 0xFF).to(tl.int32), 256, mask=match)
+@@ -226,9 +232,9 @@ def _select_rows(S, OUT, NP, POS, K: tl.constexpr, BLOCK: tl.constexpr, VISIBLE:
+         fixed = fixed | (tl.full((), 0xFF, tl.uint32) << (24 - 8 * p))
+     written = 0
+     equal_seen = 0
+-    for c in range(0, limit, BLOCK):
++    for c in range(0, NP, BLOCK):
+         i = c + tl.arange(0, BLOCK)
+-        ok = i < limit
++        ok = i < NP
+         u = _order_key(tl.load(row + i, mask=ok, other=0.0))
+         eq = (ok & (u == prefix)).to(tl.int32)
+         take = (ok & (u > prefix)) | ((eq == 1) & (tl.cumsum(eq, 0) - eq + equal_seen < need))
+@@ -238,20 +244,32 @@ def _select_rows(S, OUT, NP, POS, K: tl.constexpr, BLOCK: tl.constexpr, VISIBLE:
          equal_seen += tl.sum(eq, 0)
  
  
--def top_pools(scores: torch.Tensor, k: int) -> torch.Tensor:
+-def top_pools(scores: torch.Tensor, k: int, pos_dev: torch.Tensor | None = None) -> torch.Tensor:
 +@triton.jit
 +def _visible_bound(NPS, P, r, K: tl.constexpr):
 +    """Columns a decode row at position P + r needs: its complete pools, at least K, at most the NPS scored.
@@ -66,7 +90,8 @@ index bc5362a..36d697a 100644
 +
 +def top_pools(scores: torch.Tensor, k: int, pos: torch.Tensor | None = None) -> torch.Tensor:
      """``_top_pools``'s pools, ascending, without int64 keys, top-k or sort: one program a row, or for a decode
--    window's long rows the split selection (select_split); the same pools either way."""
+-    window's long rows the split selection (select_split); the same pools either way. ``pos_dev``: the rows sit at
+-    pos_dev, pos_dev + 1, .. and the one-program selection reads each row's visible pools only (the same pools)."""
 +    window's long rows the split selection (select_split); the same pools either way. ``pos`` (device [1]): the
 +    rows are decode rows at pos, pos + 1, ..; each is selected over its visible columns only (_visible_bound),
 +    and the columns past them need not be written."""
@@ -81,18 +106,19 @@ index bc5362a..36d697a 100644
      # one program a row (speed only): decode rows past 1,024 scores 4,096 a step, prompt chunks' rows 1,024
      block, warps = (4096, 8) if R < SPLIT_ROWS and NP > 1024 else (1024, 4)
      out = torch.empty((R, k), dtype=torch.int64, device=scores.device)
--    _select_rows[(R,)](scores, out, NP, K=k, BLOCK=block, num_warps=warps)
+-    _select_rows[(R,)](scores, out, NP, pos_dev if pos_dev is not None else scores,
+-                       K=k, BLOCK=block, VISIBLE=pos_dev is not None, num_warps=warps)
 +    _select_rows[(R,)](scores, out, NP, scores if pos is None else pos, K=k, BLOCK=block, VIS=pos is not None,
 +                       num_warps=warps)
      return out
  
  
-@@ -309,19 +330,19 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
+@@ -321,19 +339,19 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
      pkv, pks, rs, fp8 = kv8.parts(pk)
      _scores_rows[(R, grid)](qi, wts, wts.stride(0), pkv, pks, scores, np_max, pos_dev, pos_dev, pos_dev, R, np_max,
                              D ** -0.5, wscale, H=H, HP=max(16, triton.next_power_of_2(H)), D=D, BP=64, G=grid,
 -                            SEG=False, RS=rs, FP8=fp8, num_warps=4)
--    pools = top_pools(scores, TOPK_POOLS)                                               # ascending pool index
+-    pools = top_pools(scores, TOPK_POOLS, pos_dev)                                      # ascending pool index
 -    dev = qi.device
 +                            SEG=False, RS=rs, FP8=fp8, K=TOPK_POOLS, num_warps=4)
 +    # the graphs' power-of-two bucket past the rows' visible pools: neither scored nor scanned (_visible_bound); the
@@ -119,7 +145,7 @@ index bc5362a..36d697a 100644
      return tokens, counts
  
  
-@@ -720,10 +741,13 @@ def _split_digits(TOT, r, STEPS: tl.constexpr, K: tl.constexpr):
+@@ -732,10 +750,13 @@ def _split_digits(TOT, r, STEPS: tl.constexpr, K: tl.constexpr):
  
  @triton.jit
  def _select_split(S, s_stride, NPC, POS, SPR, TOT, HIST, GT, OUT, TOK, CNT, W: tl.constexpr, K: tl.constexpr,
@@ -136,7 +162,7 @@ index bc5362a..36d697a 100644
  
      r = tl.program_id(0).to(tl.int64)
      c = tl.program_id(1)
-@@ -735,9 +759,15 @@ def _select_split(S, s_stride, NPC, POS, SPR, TOT, HIST, GT, OUT, TOK, CNT, W: t
+@@ -747,9 +768,15 @@ def _select_split(S, s_stride, NPC, POS, SPR, TOT, HIST, GT, OUT, TOK, CNT, W: t
              return
          qpos = tl.load(POS + r).to(tl.int64)
          NP = (qpos + 1) // PL
@@ -154,7 +180,7 @@ index bc5362a..36d697a 100644
      nch = (NP + CHS - 1) // CHS
      if c >= nch:
          return
-@@ -769,18 +799,18 @@ def _select_split(S, s_stride, NPC, POS, SPR, TOT, HIST, GT, OUT, TOK, CNT, W: t
+@@ -781,18 +808,18 @@ def _select_split(S, s_stride, NPC, POS, SPR, TOT, HIST, GT, OUT, TOK, CNT, W: t
          take = (ok & (u > prefix)) | ((e == 1) & (tl.cumsum(e, 0) - e + equal_seen < need))
          t = take.to(tl.int32)
          slot = (written + tl.cumsum(t, 0) - t).to(tl.int64)
@@ -176,7 +202,7 @@ index bc5362a..36d697a 100644
          else:
              tl.store(OUT + r * K + slot, i.to(tl.int64), mask=take)
  
-@@ -806,8 +836,10 @@ def split_scratch(rows: int, np_: int, device) -> torch.Tensor:
+@@ -818,8 +845,10 @@ def split_scratch(rows: int, np_: int, device) -> torch.Tensor:
  
  
  def select_split(scores: torch.Tensor, k: int, *, scratch: torch.Tensor | None = None, rows=None,
@@ -189,7 +215,7 @@ index bc5362a..36d697a 100644
      tokens / counts, seg_select_tokens' per-row output over each sparse row's visible pools. ``scratch``: at least
      split_scratch(R, NP)'s (allocated when None)."""
  
-@@ -821,11 +853,15 @@ def select_split(scores: torch.Tensor, k: int, *, scratch: torch.Tensor | None =
+@@ -833,11 +862,15 @@ def select_split(scores: torch.Tensor, k: int, *, scratch: torch.Tensor | None =
      gt = scratch[R * (1024 + cp * 256):R * (1024 + cp * 257)]
      tot.zero_()
      seg = rows is not None

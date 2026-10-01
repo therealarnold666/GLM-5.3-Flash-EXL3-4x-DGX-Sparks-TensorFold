@@ -1,5 +1,5 @@
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 813f4c0..524eda3 100644
+index 2382093..a117edc 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -127,6 +127,7 @@ class Engine:
@@ -104,10 +104,10 @@ index 813f4c0..524eda3 100644
          e.window = e.constraint.window([0], [-1])
      first = e.sample(last, [len(prompt)], sampling)[0]
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index fbb3418..0ba9f05 100644
+index 2e0d675..032b546 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -834,14 +834,16 @@ class GlmEngine:
+@@ -827,14 +827,16 @@ class GlmEngine:
          return auto, auto or not dflash, dflash
  
      def _resume(self, prompt: list[int], code: list[int]):
@@ -126,7 +126,7 @@ index fbb3418..0ba9f05 100644
                      best is None or len(snap.ids) > len(best.ids)):
                  best = snap
          return best
-@@ -938,7 +940,7 @@ class GlmEngine:
+@@ -931,7 +933,7 @@ class GlmEngine:
      def _run_once(self, prompt: list[int], max_tokens: int, sampling, stop_eos: bool,
                    on_tokens: Callable[[list[int]], Any], code: list[int], hit, draft: bool,
                    feed=None, shared=()) -> dict[str, Any]:
@@ -135,7 +135,7 @@ index fbb3418..0ba9f05 100644
          from .drafter_choice import DrafterChoice, auto_decode
  
          auto, use_mtp, use_dflash = self._drafters(code)
-@@ -973,11 +975,18 @@ class GlmEngine:
+@@ -966,11 +968,18 @@ class GlmEngine:
              resume = take_snapshot(self.e, head, self.e.last_hidden if use_mtp else None, mtp=use_mtp,
                                     drafter=drafter)
              kept.append(resume)

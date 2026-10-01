@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index ff49a2a..0ed6ec3 100644
+index 1c11a54..6492798 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -128,12 +128,14 @@ class GlmEngine:
+@@ -153,12 +153,14 @@ class GlmEngine:
          explicit = context is not None if context_explicit is None else bool(context_explicit)
          from . import LATENT
  
@@ -15,11 +15,11 @@ index ff49a2a..0ed6ec3 100644
              weights_estimate = fp8_weights(weights_estimate)
 +        elif cfg.quant == "exl3" and dense_kind() == "q4":
 +            weights_estimate = q4_weights(weights_estimate)
-         # rows a prompt chunk runs at once: TF_GLM_PREFILL_ROWS (both ranks alike), more amortizes each chunk's expert
-         # weight decode over more tokens and costs buffer memory
-         if prefill_rows is None:
+         # TF_GLM_MTP off: the MTP layer's tensors, caches and buffers are neither loaded nor estimated
+         self.mtp_on = mtp_head(drafter is not None, serial_only, cfg.mtp_layers)
+         if not self.mtp_on:
 diff --git tensorfold/families/glm5_next/cuda/qmm.py tensorfold/families/glm5_next/cuda/qmm.py
-index b845afa..ee83025 100644
+index ca8a066..6377c42 100644
 --- tensorfold/families/glm5_next/cuda/qmm.py
 +++ tensorfold/families/glm5_next/cuda/qmm.py
 @@ -176,6 +176,49 @@ def quantize4(w: torch.Tensor, chunk: int = 8192) -> Q4:
@@ -109,10 +109,10 @@ index b845afa..ee83025 100644
      """A split_weights transform that counts the matrices held as FP8 at a byte a value plus their block scales."""
  
 diff --git tensorfold/families/glm5_next/cuda/weights.py tensorfold/families/glm5_next/cuda/weights.py
-index f2d3cb8..2d6ab83 100644
+index fd9db9d..766a3b0 100644
 --- tensorfold/families/glm5_next/cuda/weights.py
 +++ tensorfold/families/glm5_next/cuda/weights.py
-@@ -265,15 +265,22 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -270,15 +270,22 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          return (as_i32(t(name + ".weight")), t(name + ".scales"), t(name + ".biases"))
  
      # TF_GLM_DENSE=fp8: the BF16 matrices as FP8 with block scales (lossy, half the bytes a decode round reads)

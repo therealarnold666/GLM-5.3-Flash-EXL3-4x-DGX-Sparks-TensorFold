@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index b357ce2..64d16d9 100644
+index 2524b65..ae6a079 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -86,19 +86,34 @@ def vision_workspace() -> int:
+@@ -84,19 +84,34 @@ def vision_workspace() -> int:
  GRIDS = (16, 32, 64, 128)             # TF_GLM_PROMPT_GRID's values besides 0 (off)
  
  
@@ -40,7 +40,7 @@ index b357ce2..64d16d9 100644
      if prefill_rows % grid:
          raise ValueError(f"TF_GLM_PROMPT_GRID={grid}: prompt chunks of {prefill_rows} rows (TF_GLM_PREFILL_ROWS) "
                           f"must be a multiple of it")
-@@ -618,6 +633,9 @@ class GlmEngine:
+@@ -615,6 +630,9 @@ class GlmEngine:
          if rank == 0 and self.grid:
              print(f"[tensorfold] prompt chunks and kept prompt states on a {self.grid}-token grid "
                    f"(TF_GLM_PROMPT_GRID)", flush=True)

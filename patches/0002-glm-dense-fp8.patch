@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 43c1af4..3393fa0 100644
+index b98d846..b29529c 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -111,10 +111,16 @@ class GlmEngine:
+@@ -136,9 +136,14 @@ class GlmEngine:
          explicit = context is not None if context_explicit is None else bool(context_explicit)
          from . import LATENT
  
@@ -12,19 +12,17 @@ index 43c1af4..3393fa0 100644
 +        weights_estimate = split_weights(rule)
 +        if cfg.quant == "exl3" and dense_kind() == "fp8":
 +            weights_estimate = fp8_weights(weights_estimate)
+         # TF_GLM_MTP off: the MTP layer's tensors, caches and buffers are neither loaded nor estimated
+         self.mtp_on = mtp_head(drafter is not None, serial_only, cfg.mtp_layers)
+-        weights_estimate = split_weights(rule)
+         if not self.mtp_on:
+             weights_estimate = without_mtp(weights_estimate, cfg.layers)
          self.capacity_plan = admit(model_dir, context if explicit else cfg.dense_limit, explicit, torch,
-                                    lambda text: mla_geometry(text, 2, MAX_ROWS, minimum_slots=DENSE_CAPACITY,
-                                                              latent=LATENT),
--                                   split_weights(rule), rank=rank, world=2, gather=self._gather_ints,
-+                                   weights_estimate, rank=rank, world=2, gather=self._gather_ints,
-                                    draft_dir=drafter, draft_geometry=lambda text: draft_geometry(text, 2, MAX_ROWS))
-         self.limit = self.capacity_plan["context_window"]
-         capacity = self.capacity_plan["cache_slots"]
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index 40f1fd1..cd3cfc8 100644
+index 01a173c..f73f253 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -248,19 +248,23 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int) -> torch
+@@ -260,29 +260,32 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, cut: Cut
      k = layer.kda
      li = st.kda_index[layer.index]
      p = b.kproj[0, :R] if b.prefill else st.proj[li, :R]
@@ -41,12 +39,31 @@ index 40f1fd1..cd3cfc8 100644
 +        mm(b, fa, k.fb, None if pre else qmm.group_sums(fa, b.xs_fa[:R]), b.ka[:R])
 +        mm(b, ga, k.gb, None if pre else qmm.group_sums(ga, b.xs_ga[:R]), b.kg[:R])
      cur = st.cur[li]
--    out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log, k.dt_bias,
--                        k.norm, c.eps, c.lower, R, b.kscratch if pre else st.scratch[li], st.rec[1 - cur, li])
+-    if cut is None:
+-        out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log,
+-                            k.dt_bias, k.norm, c.eps, c.lower, R, b.kscratch if pre else st.scratch[li],
+-                            st.rec[1 - cur, li])
+-    else:
+-        n = cut.point
+-        first = kda_mod.chain(p[:n], k.b_off, b.ka[:n], b.kg[:n], st.conv[li], k.conv, st.rec[cur, li],
+-                              k.a_log, k.dt_bias, k.norm, c.eps, c.lower, n, b.kscratch, cut.rec[li]).clone()
+-        _shift_conv(cut.conv[li:li + 1], b.kproj[:, :n], n)
+-        rest = kda_mod.chain(p[n:], k.b_off, b.ka[n:R], b.kg[n:R], cut.conv[li], k.conv, cut.rec[li],
+-                             k.a_log, k.dt_bias, k.norm, c.eps, c.lower, R - n, b.kscratch, st.rec[1 - cur, li])
+-        out = torch.cat((first, rest))
 +    with prof.timed("kda: recurrence"):
-+        out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log,
-+                            k.dt_bias, k.norm, c.eps, c.lower, R, b.kscratch if pre else st.scratch[li],
-+                            st.rec[1 - cur, li])
++        if cut is None:
++            out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log,
++                                k.dt_bias, k.norm, c.eps, c.lower, R, b.kscratch if pre else st.scratch[li],
++                                st.rec[1 - cur, li])
++        else:
++            n = cut.point
++            first = kda_mod.chain(p[:n], k.b_off, b.ka[:n], b.kg[:n], st.conv[li], k.conv, st.rec[cur, li],
++                                  k.a_log, k.dt_bias, k.norm, c.eps, c.lower, n, b.kscratch, cut.rec[li]).clone()
++            _shift_conv(cut.conv[li:li + 1], b.kproj[:, :n], n)
++            rest = kda_mod.chain(p[n:], k.b_off, b.ka[n:R], b.kg[n:R], cut.conv[li], k.conv, cut.rec[li],
++                                 k.a_log, k.dt_bias, k.norm, c.eps, c.lower, R - n, b.kscratch, st.rec[1 - cur, li])
++            out = torch.cat((first, rest))
      if pre:                              # a prompt chunk keeps every row: the layer commits now
          st.cur[li] = 1 - cur
          _shift_conv(st.conv[li:li + 1], b.kproj[:, :R], R)
@@ -56,7 +73,7 @@ index 40f1fd1..cd3cfc8 100644
  
  
  def dsa_block(layer: LayerW, w: Weights, kc: torch.Tensor, vc: torch.Tensor, pos_dev: torch.Tensor, b: Buffers,
-@@ -361,14 +365,18 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -398,14 +401,18 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
          # EXL3: the routed slots through the trellis kernels, the shared expert (last slot) through BF16 matmuls
          from . import exl3_mm
  
@@ -243,7 +260,7 @@ index a366806..827db2b 100644
 +        return total, extra
 +    return transform
 diff --git tensorfold/families/glm5_next/cuda/weights.py tensorfold/families/glm5_next/cuda/weights.py
-index bc0b47f..f2d3cb8 100644
+index 48c4190..fd9db9d 100644
 --- tensorfold/families/glm5_next/cuda/weights.py
 +++ tensorfold/families/glm5_next/cuda/weights.py
 @@ -13,7 +13,7 @@ from tensorfold.cuda import experts as grouped
@@ -255,7 +272,7 @@ index bc0b47f..f2d3cb8 100644
  
  PREFIX = "model.language_model."
  
-@@ -199,7 +199,7 @@ class Weights:
+@@ -204,7 +204,7 @@ class Weights:
      embed: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
      layers: list[LayerW]
      norm: torch.Tensor
@@ -264,7 +281,7 @@ index bc0b47f..f2d3cb8 100644
      mtp: MTPW | None
      rank: int
      world: int
-@@ -221,7 +221,7 @@ class Weights:
+@@ -226,7 +226,7 @@ class Weights:
              if isinstance(t, torch.Tensor) and t.data_ptr() not in seen:
                  seen.add(t.data_ptr())
                  total += t.numel() * t.element_size()
@@ -273,7 +290,7 @@ index bc0b47f..f2d3cb8 100644
                  for v in vars(t).values():
                      add(v)
              elif isinstance(t, (list, tuple)):
-@@ -264,12 +264,16 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -269,12 +269,16 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
      def trip(name: str) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
          return (as_i32(t(name + ".weight")), t(name + ".scales"), t(name + ".biases"))
  
@@ -294,7 +311,7 @@ index bc0b47f..f2d3cb8 100644
          return stack_q4([trip(n) for n in names])
  
      def hc(i: int, site: str) -> HCW:
-@@ -290,7 +294,7 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -295,7 +299,7 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          krows, vrows = rows[:, :cfg.qk_dim].reshape(-1), rows[:, cfg.qk_dim:].reshape(-1)
          if exl3:
              w = t(p + "kv_b_proj.weight")
@@ -303,7 +320,7 @@ index bc0b47f..f2d3cb8 100644
              full_k, full_v = (lambda: w[krows].float()), (lambda: w[vrows].float())
          else:
              w, s, b = trip(p + "kv_b_proj")
-@@ -412,9 +416,9 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -417,9 +421,9 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          vl = cfg.vocab // world
          draft_head = None
          if exl3:

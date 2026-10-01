@@ -1,8 +1,8 @@
 diff --git tensorfold/cuda/http.py tensorfold/cuda/http.py
-index 589b56b..81c9b0f 100644
+index dabd045..bebd06f 100644
 --- tensorfold/cuda/http.py
 +++ tensorfold/cuda/http.py
-@@ -91,9 +91,9 @@ def make_handler(app: App):
+@@ -93,9 +93,9 @@ def make_handler(app: App):
                  return self._json(404, {"error": "not found"})
              try:
                  length = int(self.headers.get("Content-Length", 0))
@@ -15,7 +15,7 @@ index 589b56b..81c9b0f 100644
                  body = json.loads(self.rfile.read(length) or b"{}")
              except (json.JSONDecodeError, UnicodeDecodeError):
 diff --git tensorfold/server/prompts.py tensorfold/server/prompts.py
-index 3b3a23b..ac3fdc7 100644
+index 2b9c05b..9c636df 100644
 --- tensorfold/server/prompts.py
 +++ tensorfold/server/prompts.py
 @@ -40,21 +40,28 @@ def image_slot():

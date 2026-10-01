@@ -1,19 +1,19 @@
 diff --git tensorfold/cuda/geometry.py tensorfold/cuda/geometry.py
-index 908f94e..82b565f 100644
+index 9a1b8d5..7abbd21 100644
 --- tensorfold/cuda/geometry.py
 +++ tensorfold/cuda/geometry.py
-@@ -7,6 +7,7 @@ from .capacity import Geometry, itemsize
- 
+@@ -10,6 +10,7 @@ from .capacity import Geometry, Weights, headers, itemsize
  PREFILL_ROWS = 2048     # a prompt chunk's rows: Flash Next and GLM keep buffers of this many rows
+ PROMPT_SHARE = 32       # a dense prompt chunk's arrays take at most this fraction of the GPU's memory
  PREFILL_ATT_ROWS = 256  # Flash Next's prompt attention block
 +MLA_DECODE_ROWS = 64    # GLM's decode windows the MLA estimate sizes buffers for (its verify windows: at most this)
+ MLA_PROMPT_ATT_ROWS = 512   # GLM's prompt-chunk rows one dense latent attention call takes (forward.PROMPT_ATT_ROWS)
+ MLA_SELECT_ROWS = 512       # GLM's prompt-chunk rows whose pool scores are held at once (sparse.SELECT_ROWS)
  
- 
- def size(info: dict, name: str = "tensor") -> int:
-@@ -204,7 +205,7 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
+@@ -238,7 +239,7 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
      kd = int(t["qk_nope_head_dim"]) + int(t.get("qk_rope_head_dim", 0))
      vd, index = int(t["v_head_dim"]), int(t.get("index_head_dim", 128))
-     mtp = int(t.get("num_nextn_predict_layers", 0)) > 0
+     mtp = int(t.get("num_nextn_predict_layers", 0)) > 0 if mtp is None else bool(mtp)
 -    rows, d, streams = 64, int(t["hidden_size"]), int(t.get("hc_mult", 4))
 +    rows, d, streams = MLA_DECODE_ROWS, int(t["hidden_size"]), int(t.get("hc_mult", 4))
      fixed = linear * (4 * lh * ld * ld * 4 + 3 * (conv - 1) * 3 * lh * ld * 2)
@@ -33,7 +33,7 @@ index 25e4be7..3aa3b25 100644
  
  @dataclass(frozen=True)
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 0591d9f..52a5182 100644
+index c75f90c..cd9a9f1 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -84,9 +84,11 @@ class Engine:
@@ -69,7 +69,7 @@ index 0591d9f..52a5182 100644
              self.reset()
  
      def reset(self) -> None:
-@@ -390,6 +393,8 @@ class DecodeResult:
+@@ -421,6 +424,8 @@ class DecodeResult:
      rounds: int
      drafted: int = 0
      accepted: int = 0
@@ -78,7 +78,7 @@ index 0591d9f..52a5182 100644
      stages: dict[str, float] = field(default_factory=dict)
      depths: list[int] = field(default_factory=list)
      keeps: list[int] = field(default_factory=list)
-@@ -408,6 +413,55 @@ def _sync(w: Weights) -> None:
+@@ -439,6 +444,55 @@ def _sync(w: Weights) -> None:
      torch.cuda.synchronize()
  
  
@@ -134,7 +134,7 @@ index 0591d9f..52a5182 100644
  @torch.no_grad()
  def serial_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *,
                    stop_eos: bool = False, on_tokens=None) -> DecodeResult:
-@@ -416,24 +470,26 @@ def serial_decode(e: Engine, pending: int, count: int, sampling: Sampling | None
+@@ -447,24 +501,26 @@ def serial_decode(e: Engine, pending: int, count: int, sampling: Sampling | None
      w, st, b = e.w, e.st, e.buf
      out = [pending]
      stages = dict(forward=0.0, sample=0.0, commit=0.0)
@@ -166,7 +166,7 @@ index 0591d9f..52a5182 100644
      _sync(w)
      return DecodeResult(out, time.perf_counter() - start, len(out) - 1, stages=stages)
  
-@@ -474,6 +530,7 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
+@@ -505,6 +561,7 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
      c_rounds = c_drafted = c_accepted = 0
      depths: list[int] = []
      keeps: list[int] = []
@@ -174,7 +174,7 @@ index 0591d9f..52a5182 100644
      _sync(w)
      start = time.perf_counter()
      t0 = time.perf_counter()
-@@ -486,12 +543,13 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
+@@ -517,12 +574,13 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
          drafts = draft(e, e.last_hidden, [pending], st.pos + 1, depth, sampling, policy.confidence) if depth > 0 else []
      stages["draft"] += time.perf_counter() - t0
      while len(out) < count and not (stop_eos and out[-1] in w.cfg.eos):
@@ -190,7 +190,7 @@ index 0591d9f..52a5182 100644
          t1 = time.perf_counter()
          sampled = e.sample(logits[:R], [st.pos + 1 + r for r in range(R)], sampling)
          keep = 1
-@@ -513,9 +571,8 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
+@@ -544,9 +602,8 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
          out.extend(sampled[:keep])
          if copies is not None:
              copies.extend(sampled[:keep])
@@ -202,7 +202,7 @@ index 0591d9f..52a5182 100644
          stages["sample"] += t2 - t1
          stages["commit"] += t3 - t2
          if len(out) >= count or (stop_eos and out[-1] in w.cfg.eos):
-@@ -531,6 +588,7 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
+@@ -562,6 +619,7 @@ def mtp_decode(e: Engine, pending: int, count: int, sampling: Sampling | None, *
              drafts = (draft(e, e.main_hidden(slice(0, keep)), sampled[:keep], st.pos + 1, depth, sampling,
                              policy.confidence) if depth > 0 else [])
          stages["draft"] += time.perf_counter() - t4
@@ -210,7 +210,7 @@ index 0591d9f..52a5182 100644
      _sync(w)
      return DecodeResult(out[:count], time.perf_counter() - start, rounds, drafted, accepted, stages, depths, keeps,
                          copy_rounds=c_rounds, copy_drafted=c_drafted, copy_accepted=c_accepted)
-@@ -550,6 +608,7 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
+@@ -581,6 +639,7 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
      c_rounds = c_drafted = c_accepted = 0
      depths: list[int] = []
      keeps: list[int] = []
@@ -218,7 +218,7 @@ index 0591d9f..52a5182 100644
      _sync(w)
      start = time.perf_counter()
      depth = min(policy.next(0, 0), count - len(out))
-@@ -564,8 +623,10 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
+@@ -595,8 +654,10 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
          tokens = e.verify_window([out[-1]] + drafts)
          drafts = tokens[1:]
          R = len(tokens)
@@ -230,7 +230,7 @@ index 0591d9f..52a5182 100644
          t2 = time.perf_counter()
          sampled = e.sample(logits[:R], [st.pos + 1 + r for r in range(R)], sampling)
          keep = 1
-@@ -589,14 +650,14 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
+@@ -620,14 +681,14 @@ def dflash_decode(e: Engine, drafter, pending: int, count: int, sampling: Sampli
          out.extend(sampled[:keep])
          if copies is not None:
              copies.extend(sampled[:keep])
@@ -249,23 +249,23 @@ index 0591d9f..52a5182 100644
      return DecodeResult(out[:count], time.perf_counter() - start, rounds, drafted, accepted, stages, depths, keeps,
                          copy_rounds=c_rounds, copy_drafted=c_drafted, copy_accepted=c_accepted)
 diff --git tensorfold/families/glm5_next/cuda/dflash2.py tensorfold/families/glm5_next/cuda/dflash2.py
-index a6ee808..427d7f6 100644
+index 0ca8c5d..62c9373 100644
 --- tensorfold/families/glm5_next/cuda/dflash2.py
 +++ tensorfold/families/glm5_next/cuda/dflash2.py
-@@ -166,7 +166,11 @@ class DraftLayer:
- class Drafter:
+@@ -175,8 +175,10 @@ class Drafter:
      """Draft one sequence from position-indexed context using device lengths and static buffers shared by eager execution and CUDA graphs."""
  
--    def __init__(self, draft_dir: str | Path, w: Weights, *, block: int | None = None, capacity: int = 2560) -> None:
-+    def __init__(self, draft_dir: str | Path, w: Weights, *, block: int | None = None, capacity: int = 2560,
-+                 tap_rows: int = 0) -> None:
+     def __init__(self, draft_dir: str | Path, w: Weights, *, block: int | None = None, capacity: int = 2560,
+-                 ring: bool = False) -> None:
+-        """``ring`` (TF_GLM_DRAFT_RING): the context in a ring of the window and block, the same drafts."""
++                 tap_rows: int = 0, ring: bool = False) -> None:
 +        """``tap_rows``: context updates up to this many rows (a verify window's kept rows) replay captured graphs too
-+        (the block's own size always does)."""
-+
++        (the block's own size always does). ``ring`` (TF_GLM_DRAFT_RING): the context in a ring of the window and
++        block, the same drafts."""
+ 
          path = Path(draft_dir)
          cfg = json.loads((path / "config.json").read_text())
-         dc = cfg["dflash_config"]
-@@ -252,11 +256,20 @@ class Drafter:
+@@ -268,11 +270,20 @@ class Drafter:
          self.ids_host = torch.zeros((1,), dtype=torch.int32, pin_memory=torch.cuda.is_available())
          self.ar = torch.arange(max(64, n), device=dev)
          self.tap_in = torch.zeros((64, len(self.tap_layers) * self.D), dtype=torch.bfloat16, device=dev)
@@ -288,7 +288,7 @@ index a6ee808..427d7f6 100644
  
      def nbytes(self) -> int:
          total = sum(q.nbytes() for L in self.layers for q in (L.a_kp, L.m_kp, L.qkv, L.kv, L.o, L.gu, L.down))
-@@ -368,23 +381,21 @@ class Drafter:
+@@ -390,23 +401,21 @@ class Drafter:
          vals, local = torch.topk(logits.float(), self.top_k, dim=-1)
          gids = (local + self.w.vocab_offset).to(torch.int32)
          packed = torch.cat([vals, gids.view(torch.float32)], dim=1).contiguous()
@@ -318,7 +318,7 @@ index a6ee808..427d7f6 100644
              for _ in range(2):
                  self._taps_compute(n)
              torch.cuda.synchronize()
-@@ -413,7 +424,15 @@ class Drafter:
+@@ -435,7 +444,15 @@ class Drafter:
              self.block_graph.replay()
          else:
              self._block_compute()
@@ -335,7 +335,7 @@ index a6ee808..427d7f6 100644
          k = self.top_k
          values = torch.cat([g[r, :, :k] for r in range(g.shape[0])], dim=1).numpy().astype(np.float64)
          tokens = torch.cat([g[r, :, k:].contiguous().view(torch.int32) for r in range(g.shape[0])],
-@@ -422,7 +441,7 @@ class Drafter:
+@@ -444,7 +461,7 @@ class Drafter:
              order = np.lexsort((tokens, -values), axis=-1)[:, :k]
              values = np.take_along_axis(values, order, axis=1)
              tokens = np.take_along_axis(tokens, order, axis=1)
@@ -394,7 +394,7 @@ index b14a7e9..01ad045 100644
      seconds = time.perf_counter() - start
      if drafter is not None and n_f:
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index b27eb43..d770cff 100644
+index 613a0f7..76602c5 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
 @@ -14,8 +14,9 @@ from typing import Any, Callable
@@ -407,9 +407,9 @@ index b27eb43..d770cff 100644
 +MAX_ROWS = 16                         # the widest verify window (a pending token and up to 15 drafts: copy drafts)
 +MTP_ROWS = 8                          # rows an MTP step takes at once (a kept backlog is absorbed in steps of this)
  DENSE_CAPACITY = 2560                 # cache slots while DSA attention stays dense (contexts up to 2,051 tokens)
- # --vision (rank 0): what startup reserves beside the tower's 1.05 GiB of bf16 weights for an encode and its
- # prompt's feature rows (8 KiB a row, which stay through the prefill). The encode's scratch takes turns with a prompt
-@@ -183,7 +184,7 @@ class GlmEngine:
+ # TF_GLM_DRAFT_RING=0: DFlash2's context in a flat buffer of the whole window, not a 2,176-row ring (the same drafts)
+ DRAFT_RING = os.environ.get("TF_GLM_DRAFT_RING", "1").strip() != "0"
+@@ -208,7 +209,7 @@ class GlmEngine:
          explicit = context is not None if context_explicit is None else bool(context_explicit)
          from . import LATENT
  
@@ -418,45 +418,45 @@ index b27eb43..d770cff 100644
  
          # TF_GLM_DENSE=fp8 (an EXL3 checkpoint): its BF16 matrices take a byte a value, which the estimate counts
          weights_estimate = split_weights(rule)
-@@ -191,6 +192,9 @@ class GlmEngine:
+@@ -216,6 +217,9 @@ class GlmEngine:
              weights_estimate = fp8_weights(weights_estimate)
          elif cfg.quant == "exl3" and dense_kind() == "q4":
              weights_estimate = q4_weights(weights_estimate)
 +        # TF_GLM_KVB=fp8/q4 (an EXL3 checkpoint, latent cache): kv_b as the absorb and expand kernels read it
 +        kvb = kvb_kind() if cfg.quant == "exl3" and LATENT else "bf16"
 +        weights_estimate = kvb_weights(weights_estimate, kvb)
-         # rows a prompt chunk runs at once: TF_GLM_PREFILL_ROWS (both ranks alike), more amortizes each chunk's expert
-         # weight decode over more tokens and costs buffer memory
-         if prefill_rows is None:
-@@ -230,8 +234,8 @@ class GlmEngine:
+         # TF_GLM_MTP off: the MTP layer's tensors, caches and buffers are neither loaded nor estimated
+         self.mtp_on = mtp_head(drafter is not None, serial_only, cfg.mtp_layers)
+         if not self.mtp_on:
+@@ -261,8 +265,8 @@ class GlmEngine:
          quant_code = DRAFT_QUANTS.index(draft_quant())
          # both ranks must run the same calls: refuse to start when they were given different settings
          mine = [int(drafter is not None), capacity, int(long_context), int(serial_only), int(LATENT),
 -                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code() + [
--                int(self.dump is not None), quant_code]
+-                int(self.dump is not None), quant_code, int(self.mtp_on), int(DRAFT_RING)]
 +                prefill_rows, self.grid, KVB_KINDS.index(kvb)] + (self.copy.code() if self.copy is not None else [0, 0]) + \
-+            self.split.code() + [int(self.dump is not None), quant_code]
++            self.split.code() + [int(self.dump is not None), quant_code, int(self.mtp_on), int(DRAFT_RING)]
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
          wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -239,7 +243,7 @@ class GlmEngine:
+@@ -270,7 +274,7 @@ class GlmEngine:
          both = self._gather_ints(mine + [spare >> 20])
          if both[0][:-1] != both[1][:-1]:
              raise RuntimeError("the two ranks were started with different settings (draft model, context, drafts, "
 -                               "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_COPY_*, "
 +                               "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_KVB, TF_GLM_COPY_*, "
                                 "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_DRAFT_DUMP, "
-                                "TF_GLM_DRAFT_QUANT): "
+                                "TF_GLM_DRAFT_QUANT, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
-@@ -263,10 +267,11 @@ class GlmEngine:
+@@ -299,10 +303,11 @@ class GlmEngine:
          if drafter is not None:
              from .dflash2 import Drafter
  
--            self.drafter = Drafter(drafter, w, capacity=capacity)
+-            self.drafter = Drafter(drafter, w, capacity=capacity, ring=DRAFT_RING)
 -        self.e = Engine(w, capacity=capacity, max_rows=MAX_ROWS, prefill_rows=prefill_rows, graphs=True, graph_rows=GRAPH_ROWS,
 -                        long_context=long_context, taps=self.drafter.tap_layers if self.drafter is not None else (),
 -                        grid=self.grid, split=self.split)
-+            self.drafter = Drafter(drafter, w, capacity=capacity, tap_rows=MAX_ROWS)
++            self.drafter = Drafter(drafter, w, capacity=capacity, tap_rows=MAX_ROWS, ring=DRAFT_RING)
 +        self.e = Engine(w, capacity=capacity, max_rows=MAX_ROWS, prefill_rows=prefill_rows, graphs=True,
 +                        graph_rows=GRAPH_ROWS, long_context=long_context,
 +                        taps=self.drafter.tap_layers if self.drafter is not None else (), grid=self.grid,
@@ -464,7 +464,7 @@ index b27eb43..d770cff 100644
          if self.e.pbuf.split is not None:
              self.e.pbuf.split.warm()                 # both ranks: open the send/receive connection now
              if rank == 0:
-@@ -327,7 +332,7 @@ class GlmEngine:
+@@ -364,7 +369,7 @@ class GlmEngine:
              return [int(t) for t in rng.integers(0, vocab, n)]
  
          prefill(e, tokens(64), None, mtp=True, drafter=self.drafter)
@@ -473,7 +473,7 @@ index b27eb43..d770cff 100644
          one, six = tokens(1), tokens(6)
          start = st.mtp_len
  
-@@ -335,7 +340,10 @@ class GlmEngine:
+@@ -372,7 +377,10 @@ class GlmEngine:
              st.set_mtp_len(start)
              st.mtp_drafted = 0
  
@@ -485,7 +485,7 @@ index b27eb43..d770cff 100644
          if self.w.mtp is not None:
              pieces["m1"] = (lambda: draft(e, hidden[:1], one, st.pos + 1, 1, None), rewind)
              pieces["m3"] = (lambda: draft(e, hidden[:1], one, st.pos + 1, 3, None), rewind)
-@@ -374,7 +382,7 @@ class GlmEngine:
+@@ -411,7 +419,7 @@ class GlmEngine:
          e.reset()
          if self.drafter is not None:
              self.drafter.reset()
@@ -495,7 +495,7 @@ index b27eb43..d770cff 100644
          slope = statistics.median((ys[j] - ys[i]) / (rows[j] - rows[i]) for i in range(len(rows))
                                    for j in range(i + 1, len(rows)))
 diff --git tensorfold/families/glm5_next/cuda/latent.py tensorfold/families/glm5_next/cuda/latent.py
-index 62cc861..fff0bf6 100644
+index 55e7e77..e6d7924 100644
 --- tensorfold/families/glm5_next/cuda/latent.py
 +++ tensorfold/families/glm5_next/cuda/latent.py
 @@ -76,6 +76,46 @@ class AbsorbQ4:
@@ -681,7 +681,7 @@ index 62cc861..fff0bf6 100644
          BN = 16
          _expand_v4[(H, a.v_dim // BN)](o_lat, a.wvw, a.wvs, a.wvb, out, R, H=H, DV=a.v_dim, LW=a.lw, BN=BN,
 diff --git tensorfold/families/glm5_next/cuda/qmm.py tensorfold/families/glm5_next/cuda/qmm.py
-index 6ed26f1..f5225c6 100644
+index 3c40295..e0b06a3 100644
 --- tensorfold/families/glm5_next/cuda/qmm.py
 +++ tensorfold/families/glm5_next/cuda/qmm.py
 @@ -180,6 +180,14 @@ def quantize4_mse(w: torch.Tensor, chunk: int = 4096, grid: int = 16) -> Q4:
@@ -752,7 +752,7 @@ index 6ed26f1..f5225c6 100644
  _F8_NAMES = __import__("re").compile(
      r"(\.(q_proj|k_proj|v_proj|f_a_proj|g_a_proj|b_proj|f_b_proj|g_b_proj|o_proj|q_a_proj|kv_a_proj_with_mqa|q_b_proj"
 diff --git tensorfold/families/glm5_next/cuda/weights.py tensorfold/families/glm5_next/cuda/weights.py
-index 8b8b10d..3d7a6b0 100644
+index 55bb452..783bd39 100644
 --- tensorfold/families/glm5_next/cuda/weights.py
 +++ tensorfold/families/glm5_next/cuda/weights.py
 @@ -13,8 +13,8 @@ from tensorfold.cuda import experts as grouped
@@ -766,7 +766,7 @@ index 8b8b10d..3d7a6b0 100644
  
  PREFIX = "model.language_model."
  
-@@ -148,12 +148,12 @@ class DSAW:
+@@ -153,12 +153,12 @@ class DSAW:
      q_norm: torch.Tensor
      kv_norm: torch.Tensor
      q_b: Q4
@@ -782,7 +782,7 @@ index 8b8b10d..3d7a6b0 100644
  
  
  @dataclass
-@@ -222,7 +222,8 @@ class Weights:
+@@ -227,7 +227,8 @@ class Weights:
              if isinstance(t, torch.Tensor) and t.data_ptr() not in seen:
                  seen.add(t.data_ptr())
                  total += t.numel() * t.element_size()
@@ -792,7 +792,7 @@ index 8b8b10d..3d7a6b0 100644
                  for v in vars(t).values():
                      add(v)
              elif isinstance(t, (list, tuple)):
-@@ -275,6 +276,7 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -280,6 +281,7 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          big, big_stack = make_dense_q4, stack_dense_q4
      else:
          big, big_stack = dense, dense_stack
@@ -800,7 +800,7 @@ index 8b8b10d..3d7a6b0 100644
  
      def q4(name: str) -> Q4 | B16 | F8:
          return big(t(name + ".weight")) if exl3 else make_q4(*trip(name))
-@@ -300,18 +302,22 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -305,18 +307,22 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          proj = stack([p + "q_a_proj", p + "kv_a_proj_with_mqa"])
          rows = torch.arange(HL * 512, device=dev).view(HL, 512)
          krows, vrows = rows[:, :cfg.qk_dim].reshape(-1), rows[:, cfg.qk_dim:].reshape(-1)

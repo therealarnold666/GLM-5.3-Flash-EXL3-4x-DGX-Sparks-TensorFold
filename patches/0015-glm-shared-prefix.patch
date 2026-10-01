@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 52a5182..64f5be7 100644
+index cd9a9f1..79a6427 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
-@@ -282,17 +282,36 @@ def _row_views(st, n: int, m: int) -> list[torch.Tensor]:
+@@ -308,18 +308,37 @@ def _row_views(st, n: int, m: int) -> list[torch.Tensor]:
      return views
  
  
@@ -33,8 +33,10 @@ index 52a5182..64f5be7 100644
      snap.rows = [v.clone() for v in views]
      snap.nbytes = sum(r.numel() * r.element_size() for r in snap.rows)
 -    snap.drafter_end = -1
+-    snap.drafter_rows = None
 +    if drafter is None or snap.drafter_end != len(snap.ids):
 +        snap.drafter_end = -1
++        snap.drafter_rows = None
  
  
 -def row_bytes(e: Engine, snap: Snapshot) -> int:
@@ -45,7 +47,7 @@ index 52a5182..64f5be7 100644
  
  
  def snapshot_bytes(snap: Snapshot) -> int:
-@@ -301,9 +320,12 @@ def snapshot_bytes(snap: Snapshot) -> int:
+@@ -328,9 +347,12 @@ def snapshot_bytes(snap: Snapshot) -> int:
      return sum(t.numel() * t.element_size() for t in held) + (snap.nbytes if snap.rows is not None else 0)
  
  
@@ -62,10 +64,10 @@ index 52a5182..64f5be7 100644
  
  
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index d770cff..ddb968f 100644
+index 76602c5..c4b826e 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -70,6 +70,84 @@ def grid_point(n: int, cut: int, grid: int) -> int | None:
+@@ -72,6 +72,84 @@ def grid_point(n: int, cut: int, grid: int) -> int | None:
      return point if point > cut else None
  
  
@@ -150,7 +152,7 @@ index d770cff..ddb968f 100644
  def encode_policy(spec: str) -> list[int]:
      """Encode policy kind, maximum drafts, and two parameters in millionths as four integers, with 10 added to kind for DFlash2."""
  
-@@ -135,6 +213,9 @@ def _ints_f64(lo: int, hi: int) -> float:
+@@ -159,6 +237,9 @@ def without_mtp(transform, layers: int):
  class GlmEngine:
      """GLM-5.3-Flash on two ranks (this one ``rank``): weights, MTP and DFlash2 drafting, per-request policies."""
  
@@ -160,7 +162,7 @@ index d770cff..ddb968f 100644
      def __init__(self, model_dir: Path, *, rank: int, master: str, port: int, policy: str = DEFAULT_POLICY,
                   drafter: Path | None = None, context: int | None = None, context_explicit: bool | None = None, serial_only: bool = False, comm=None,
                   prefill_rows: int | None = None, vision: bool = False, vision_urls: bool = False,
-@@ -204,6 +285,9 @@ class GlmEngine:
+@@ -233,6 +314,9 @@ class GlmEngine:
              raise ValueError(f"prefill rows: a multiple of 64 from 64 to 16,384, not {prefill_rows}")
          # TF_GLM_PROMPT_GRID=G: prompt chunks start on multiples of G and kept prompt states sit on them
          self.grid = prompt_grid(prefill_rows)
@@ -170,25 +172,25 @@ index d770cff..ddb968f 100644
          vision = bool(vision) and rank == 0
          workspace = vision_workspace() if vision else 0
          if vision:                           # the tower's bf16 weights, which the split rule drops
-@@ -235,7 +319,7 @@ class GlmEngine:
+@@ -266,7 +350,7 @@ class GlmEngine:
          # both ranks must run the same calls: refuse to start when they were given different settings
          mine = [int(drafter is not None), capacity, int(long_context), int(serial_only), int(LATENT),
                  prefill_rows, self.grid, KVB_KINDS.index(kvb)] + (self.copy.code() if self.copy is not None else [0, 0]) + \
--            self.split.code() + [int(self.dump is not None), quant_code]
-+            self.split.code() + [int(self.dump is not None), quant_code, self.shared]
+-            self.split.code() + [int(self.dump is not None), quant_code, int(self.mtp_on), int(DRAFT_RING)]
++            self.split.code() + [int(self.dump is not None), quant_code, self.shared, int(self.mtp_on), int(DRAFT_RING)]
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
          wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -245,7 +329,7 @@ class GlmEngine:
+@@ -276,7 +360,7 @@ class GlmEngine:
              raise RuntimeError("the two ranks were started with different settings (draft model, context, drafts, "
                                 "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_KVB, TF_GLM_COPY_*, "
                                 "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_DRAFT_DUMP, "
--                               "TF_GLM_DRAFT_QUANT): "
-+                               "TF_GLM_DRAFT_QUANT, TF_GLM_SHARED_PREFIX): "
+-                               "TF_GLM_DRAFT_QUANT, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
++                               "TF_GLM_DRAFT_QUANT, TF_GLM_SHARED_PREFIX, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
                                 "(or pass --drafter none to both) and give both the same flags")
          self.cache_bytes = min(both[0][-1], both[1][-1]) << 20
-@@ -285,6 +369,11 @@ class GlmEngine:
+@@ -321,6 +405,11 @@ class GlmEngine:
          if rank == 0 and self.grid:
              print(f"[tensorfold] prompt chunks and kept prompt states on a {self.grid}-token grid "
                    f"(TF_GLM_PROMPT_GRID)", flush=True)
@@ -200,7 +202,7 @@ index d770cff..ddb968f 100644
          if self.drafter is not None:
              self.drafter.capture()
          self.costs = self._calibrate()
-@@ -465,6 +554,7 @@ class GlmEngine:
+@@ -529,6 +618,7 @@ class GlmEngine:
          """Save the rows of every kept snapshot the next prefill overwrites, dropping the oldest entries past the memory budget; both ranks decide alike."""
          from .decode import row_bytes, save_rows
  
@@ -208,7 +210,7 @@ index d770cff..ddb968f 100644
          live = self.live
          dropped = False
  
-@@ -478,7 +568,7 @@ class GlmEngine:
+@@ -542,7 +632,7 @@ class GlmEngine:
              if live[:n] != snap.ids:                  # its rows are already gone: nothing to resume from
                  self._drop(snap)
                  continue
@@ -217,7 +219,7 @@ index d770cff..ddb968f 100644
              while self._held_bytes() + need > self.cache_bytes:
                  old = next((c for c in self.cache if c is not snap and not resumes(c)), None)
                  if old is None:
-@@ -489,28 +579,51 @@ class GlmEngine:
+@@ -553,28 +643,51 @@ class GlmEngine:
                  self._drop(snap)
                  dropped = True
                  continue
@@ -273,7 +275,7 @@ index d770cff..ddb968f 100644
          from .decode import DepthPolicy, dflash_decode, mtp_decode, prefill, serial_decode, take_snapshot
          from .drafter_choice import DrafterChoice, auto_decode
  
-@@ -523,7 +636,7 @@ class GlmEngine:
+@@ -587,7 +700,7 @@ class GlmEngine:
          cut = len(hit.ids) if hit is not None else 0
          self._take_over(list(hit.ids) if hit is not None else [])
          if hit is not None and hit.rows is not None:
@@ -282,7 +284,7 @@ index d770cff..ddb968f 100644
              hit.rows, hit.nbytes = None, 0            # live again
          # an image prompt's rows are not its token ids' rows: nothing resumes from them, and they are not kept
          self.live = list(prompt) if feed is None else []
-@@ -532,22 +645,32 @@ class GlmEngine:
+@@ -596,22 +709,32 @@ class GlmEngine:
          # first token), keeps that state, and resumes from it as a later request would: so any prompt extending
          # prompt[:point] passes through the same state there, fresh or resumed. Both ranks decide alike
          point = grid_point(len(prompt), cut, self.grid) if draft and feed is None else None
@@ -326,7 +328,7 @@ index d770cff..ddb968f 100644
          on_tokens([first])
          if max_tokens <= 1 or (stop_eos and first in self.eos):
              return stats
-@@ -634,12 +757,14 @@ class GlmEngine:
+@@ -698,12 +821,14 @@ class GlmEngine:
              feed = VisionFeed(self, positions, rows)
              feed.encode_s = time.perf_counter() - t
          hit = self._resume(list(prompt), code) if draft and feed is None else None
@@ -341,8 +343,8 @@ index d770cff..ddb968f 100644
 +                  *(shared + [0] * SHARED_MOST)[:SHARED_MOST]] + code
          from tensorfold.engine.grammar import pack
  
-         self._share(header)
-@@ -648,7 +773,8 @@ class GlmEngine:
+         self._ring()                                   # wakes rank 1, which idles on the store, not in the all-gather
+@@ -713,7 +838,8 @@ class GlmEngine:
              self._share(pack(constraint))
          if positions:
              self._share(positions)
@@ -352,7 +354,7 @@ index d770cff..ddb968f 100644
          stats.update(policy=spec, drafts=draft)
          if hasattr(self.comm, "check"):                  # a RoCE wait that timed out inside a graph surfaces here
              self.comm.check()
-@@ -659,32 +785,38 @@ class GlmEngine:
+@@ -724,33 +850,39 @@ class GlmEngine:
      def follow(self) -> None:
          """Rank 1: mirror every request rank 0 serves, forever."""
  
@@ -365,6 +367,7 @@ index d770cff..ddb968f 100644
          from tensorfold.engine.exact_sampling import Sampling
  
 -        while True:
+-            self._await_bell()
 -            (max_tokens, stop_eos, draft, cached, s_lo, s_hi, s_top, t_lo, t_hi, top_k, p_lo, p_hi, m_lo, m_hi, shaped,
 -             images, *code) = self._share(None)
 -            prompt = self._share(None)
@@ -388,6 +391,7 @@ index d770cff..ddb968f 100644
 -                      constraint, feed)
 -            if hasattr(self.comm, "check"):
 -                self.comm.check()
++        self._await_bell()
 +        (max_tokens, stop_eos, draft, cached, s_lo, s_hi, s_top, t_lo, t_hi, top_k, p_lo, p_hi, m_lo, m_hi, shaped,
 +         images, *rest) = self._share(None)
 +        shared, code = [p for p in rest[:SHARED_MOST] if p], rest[SHARED_MOST:]

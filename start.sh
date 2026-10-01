@@ -18,7 +18,7 @@
 # Setup: WORKER=user@<worker address> in scripts/local.sh (key-based ssh).
 # Settings, from the environment, scripts/local.sh or ./.env (defaults and measured effects in scripts/config.sh):
 #   serving  CONTEXT, PARALLEL, KV, DENSE, DRAFTER, DRAFT_POLICY, COPY, COPY_MAX, COPY_CODE, SPLIT, KDA_CHUNKED,
-#            SHARED_PREFIX, MULTI_PREFILL, KV_POOL_GIB, MEMORY_RESERVE_GIB, THINKING, VISION, VISION_URLS, COMM, SERVED_NAME, HOST, PORT
+#            SHARED_PREFIX, MULTI_PREFILL, KV_POOL_GIB, MEMORY_RESERVE_GIB, MAX_TOKENS, THINKING, VISION, VISION_URLS, COMM, SERVED_NAME, HOST, PORT
 #   nodes    WORKER, FABRIC_PEER, MASTER_PORT, NCCL_RAILS (1: one CX7 port), NCCL_CHANNELS, NCCL_DEBUG
 #   files    MODEL_ID, MODEL_REVISION, DFLASH2_ID, DFLASH2_REVISION, HF_CACHE (default: HF_HOME), KERNEL_CACHE,
 #            WORKER_WEIGHTS (copy | nfs: rank 1 reads the head's HF_CACHE over NFS), NFS_PATH, NFS_SERVER, NFS_VOLUME,
@@ -47,13 +47,14 @@ for arg in "$@"; do [[ "$arg" == -h || "$arg" == --help ]] && { usage; exit 0; }
 
 # The serve arguments both ranks share: scripts/config.sh's defaults first, then the command line's (argparse keeps
 # the last value). --drafter goes in front after the setup step, which knows DFlash2's snapshot.
-SERVE_ARGS=(--context "$CONTEXT" --parallel "$PARALLEL")
+SERVE_ARGS=(--context "$CONTEXT" --parallel "$PARALLEL" --max-tokens "$MAX_TOKENS")
 [[ "$DRAFTER" =~ ^(mtp|dflash2)$ ]] || die "DRAFTER is mtp or dflash2, not $DRAFTER"
 [[ "$DENSE" =~ ^(bf16|fp8|q4)$ ]] || die "DENSE is bf16, fp8 or q4, not $DENSE"
 [[ "$COMM" =~ ^(nccl|roce)$ ]] || die "COMM is nccl or roce, not $COMM"
 [[ "$KV" =~ ^(bf16|fp8)$ ]] || die "KV is bf16 or fp8, not $KV"
 [[ "$CONTEXT" =~ ^[0-9]+$ && "$CONTEXT" -le 1048576 ]] || die "CONTEXT is a token count up to 1048576 (0: the largest that fits), not $CONTEXT"
 [[ "$PARALLEL" =~ ^[1-4]$ ]] || die "PARALLEL is 1 to 4, not $PARALLEL"
+[[ "$MAX_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "MAX_TOKENS is a token count, not $MAX_TOKENS"
 [[ "$DRAFTER" == dflash2 || "$PARALLEL" == 1 ]] || die "PARALLEL=$PARALLEL needs DRAFTER=dflash2 (mtp serves one request at a time: PARALLEL=1)"
 for v in SPLIT SHARED_PREFIX KDA_CHUNKED COPY_CODE MULTI_PREFILL; do [[ "${!v}" =~ ^[01]$ ]] || die "$v is 0 or 1, not ${!v}"; done
 [[ "$WORKER_WEIGHTS" == copy || "$WORKER_WEIGHTS" == nfs ]] || die "WORKER_WEIGHTS is copy or nfs, not $WORKER_WEIGHTS"
@@ -131,6 +132,11 @@ fi
 why="scripts/prepare.sh did not"; [[ "${PREPARE:-auto}" == 0 ]] && why="PREPARE=0 skipped scripts/prepare.sh, which would"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing: $why build it"
 worker docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing on the worker: $why copy it there"
+# Compiled kernels are kept per image (its patches hash): a build is found by its extension's name, so another image's
+# build of the same name, older or newer, must never be the one loaded
+KCACHE=$(docker image inspect -f '{{index .Config.Labels "tf.patches"}}' "$IMAGE" 2>/dev/null || true)
+[[ "$KCACHE" =~ ^[0-9a-f]{12}$ ]] || KCACHE=$(docker image inspect -f '{{.Id}}' "$IMAGE" | cut -d: -f2 | cut -c1-12)
+# (docker creates the folder at the mount: the cache is the containers', so it may not be writable from here)
 # The snapshots both ranks serve (config.sh's pins, else refs/main), as paths under the containers' cache mount: the
 # ranks read them offline, whatever the Hub's main is now. The worker's cache is its own HF_HOME (prepare.sh copies
 # into the same place).
@@ -217,7 +223,7 @@ launch() {
   log "Rank 0 here: ${rank0[*]}"
   worker_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}"
               $(nccl_env "$WORKER_DEV" "$WORKER_HCAS" "$WORKER_GID")
-              -v "$WORKER_MOUNT" -v '$HOME/.cache/tensorfold-glm53:/cache'
+              -v "$WORKER_MOUNT" -v "\$HOME/.cache/tensorfold-glm53/$KCACHE:/cache"
               "$IMAGE" "${rank1[@]}")
   remote=""; for a in "${worker_cmd[@]}"; do
     case "$a" in '$HOME'*) remote+=" \"$a\"" ;; *) remote+=" $(printf '%q' "$a")" ;; esac
@@ -225,7 +231,7 @@ launch() {
   worker "mkdir -p \$HOME/.cache/tensorfold-glm53 &&$remote" >/dev/null || die "could not start rank 1 on $WORKER"
   docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}" \
     $(nccl_env "$HEAD_DEV" "$HEAD_HCAS" "$HEAD_GID") \
-    -v "$HF_CACHE":/root/.cache/huggingface -v "$KERNEL_CACHE":/cache \
+    -v "$HF_CACHE":/root/.cache/huggingface -v "$KERNEL_CACHE/$KCACHE":/cache \
     "$IMAGE" "${rank0[@]}" >/dev/null
 }
 # FOREGROUND=1: stay attached to rank 0's log and exit with its code (systemd's Restart=on-failure). Either rank ending

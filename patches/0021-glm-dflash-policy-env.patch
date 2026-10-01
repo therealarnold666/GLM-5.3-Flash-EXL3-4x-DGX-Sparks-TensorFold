@@ -1,5 +1,5 @@
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index f50b3a1..edcf082 100644
+index b626ecf..e37584a 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
 @@ -12,7 +12,9 @@ from pathlib import Path
@@ -13,8 +13,8 @@ index f50b3a1..edcf082 100644
  EXL3_AUTO = DFLASH_POLICY             # what auto runs on an EXL3 checkpoint with the draft model
  GRAPH_ROWS = (1, 2, 3, 4, 5, 6, 7, 8)  # verify windows (and MTP steps) captured as CUDA graphs; wider ones run eagerly
  MAX_ROWS = 16                         # the widest verify window (a pending token and up to 15 drafts: copy drafts)
-@@ -276,6 +278,8 @@ class GlmEngine:
-         from tensorfold.cuda.geometry import PREFILL_ROWS, draft_geometry, mla_geometry, split_weights
+@@ -301,6 +303,8 @@ class GlmEngine:
+                                               split_weights)
  
          encode_policy(policy)                           # a bad default fails here, not in the first request
 +        if not encode_policy(DFLASH_POLICY)[0] >= 10:

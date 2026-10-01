@@ -373,10 +373,10 @@ index 71cd600..5e21f90 100644
      if plan.tile != grouped.TILE:
          raise ValueError("the EXL3 kernel takes items of 16 pairs")
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index cf16c8f..6c81ba8 100644
+index a5a4180..a961a94 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -312,6 +312,16 @@ def dsa_block(layer: LayerW, w: Weights, kc: torch.Tensor, vc: torch.Tensor, pos
+@@ -314,12 +314,23 @@ def dsa_block(layer: LayerW, w: Weights, kc: torch.Tensor, vc: torch.Tensor, pos
      return out_proj(w, b, o, a.o, None if b.prefill else qmm.group_sums(o, b.xs_ao[:R]), R)
  
  
@@ -390,10 +390,20 @@ index cf16c8f..6c81ba8 100644
 +    return min(R, max(0, sparse.SPARSE_FROM - host_pos))
 +
 +
- def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffers, R: int, nch: int | None,
-                 index, host_pos: int | None, sparse_np: int | None = None) -> torch.Tensor:
-     """DSA on the latent cache: the same indexer and selection, attention over latents with kv_b's key blocks absorbed into the query."""
-@@ -336,16 +346,22 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+ def dense_attention(qa: torch.Tensor, lc: torch.Tensor, pos_dev: torch.Tensor, s: latent.LatentScratch, *,
+-                    scale: float, nch: int, out: torch.Tensor) -> torch.Tensor:
+-    """``latent.attention`` in blocks of ``part_rows`` rows, each at its first row's position: one call's bits a row."""
++                    scale: float, nch: int, out: torch.Tensor, hb: int | None = None) -> torch.Tensor:
++    """``latent.attention`` in blocks of ``part_rows`` rows, each at its first row's position: one call's bits a row
++    (``hb``: the window's ``head_block``, which a window's first rows computed alone keep)."""
+ 
+     R, step = qa.shape[0], s.part_rows
+-    hb = latent.head_block(R)
++    hb = latent.head_block(R) if hb is None else hb
+     if R <= step:
+         return latent.attention(qa, lc, pos_dev, s, scale=scale, nch=nch, out=out, hb=hb)
+     for r0 in range(0, R, step):
+@@ -353,16 +364,22 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
      ol = s.ol[:R]
      scale = c.qk_dim ** -0.5
      if not all_sparse:
@@ -402,9 +412,9 @@ index cf16c8f..6c81ba8 100644
 +        # and only the rows before it (a row's dense bits do not depend on the rows after it: latent.attention).
 +        dense = dense_rows(c, R, host_pos) if sparse_rows else R
          with prof.timed("dsa: dense attention"):
--            latent.attention(qa, lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol)
-+            latent.attention(qa[:dense], lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol[:dense],
-+                             hb=latent.head_block(R))
+-            dense_attention(qa, lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol)
++            dense_attention(qa[:dense], lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol[:dense],
++                            hb=latent.head_block(R))
      if sparse_rows:
          with prof.timed("dsa: select tokens"):
              mm(b, b.qr[:R], ix.qb, b.xs_qr[:R], b.qi[:R])
@@ -419,7 +429,7 @@ index cf16c8f..6c81ba8 100644
      with prof.timed("dsa: expand"):
          o = latent.expand_v(ol, a.absorb, b.vn[:R], prompt=b.prefill and latent.PROMPT_MMA).view(R, HL * c.v_dim)
      return out_proj(w, b, o, a.o, qmm.group_sums(o, b.xs_ao[:R]), R)
-@@ -377,8 +393,11 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -394,8 +411,11 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
              glue.swiglu(b.sgu[:R], b.sact[:R], b.sxs[:R], c.limit)
              mm(b, b.sact[:R], s.down, b.sxs[:R], b.sy[:R], f32=True)
          with prof.timed("moe: combine"):
@@ -467,7 +477,7 @@ index 84f0dbe..dbde3f1 100644
 +    block = min(1024, d)
 +    _combine_sy[(rows, d // block)](y, sy, wts, out, D=d, SLOTS=wts.shape[1], BLOCK=block, num_warps=4)
 diff --git tensorfold/families/glm5_next/cuda/latent.py tensorfold/families/glm5_next/cuda/latent.py
-index 2e2a32e..62cc861 100644
+index 1fac95e..55e7e77 100644
 --- tensorfold/families/glm5_next/cuda/latent.py
 +++ tensorfold/families/glm5_next/cuda/latent.py
 @@ -273,6 +273,21 @@ def _tile(q, kv, m, l, o, valid, SCALE: tl.constexpr):
@@ -571,30 +581,28 @@ index 2e2a32e..62cc861 100644
  @triton.jit
  def _merge(PO, PM, PL, OUT, CNT, R, H: tl.constexpr, LW: tl.constexpr, NCH: tl.constexpr, SPARSE: tl.constexpr):
      """Program (row, head): the row's chunk partials in chunk order -> OUT[r, h] bf16. Sparse: rows with CNT 0 skip."""
-@@ -371,14 +458,19 @@ class LatentScratch:
- 
+@@ -373,7 +460,10 @@ class LatentScratch:
  
  def attention(qa: torch.Tensor, cache: torch.Tensor, pos: torch.Tensor, s: LatentScratch, *, scale: float,
--              nch: int, out: torch.Tensor) -> torch.Tensor:
--    """Dense causal attention of qa [R, H, 512] over the cache through pos + R - 1, visiting nch 512-key chunks (empty ones skipped) -> out [R, H, 512]."""
-+              nch: int, out: torch.Tensor, hb: int | None = None) -> torch.Tensor:
+               nch: int, out: torch.Tensor, hb: int | None = None) -> torch.Tensor:
+-    """Dense causal attention of qa [R, H, 512] through pos + R - 1 in nch 512-key chunks; a row ignores the others."""
 +    """Dense causal attention of qa [R, H, 512] over the cache through pos + R - 1, visiting nch 512-key chunks (empty ones skipped) -> out [R, H, 512].
 +
 +    Row r's programs read only its query, keys 0 .. pos + r and its own partials, so the first rows of a window
 +    computed alone (``qa[:n]``, the same nch and ``hb``: the window's ``head_block``) get the window's bits."""
      R, H, LW = qa.shape
-     if nch > s.nch or R > s.rows or LW != s.lw:
+     if nch > s.nch or R > s.part_rows or LW != s.lw:
          raise ValueError(f"latent attention: {R} rows, {nch} chunks, width {LW} past the scratch's "
-                          f"{s.rows}, {s.nch}, {s.lw}")
+@@ -381,7 +471,7 @@ def attention(qa: torch.Tensor, cache: torch.Tensor, pos: torch.Tensor, s: Laten
      n = nch * R * H
--    hb = head_block(R)
-+    hb = head_block(R) if hb is None else hb
-+    if hb not in (HB, HB_WIDE):
+     hb = head_block(R) if hb is None else hb
+     if hb not in (HB, HB_WIDE):
+-        raise ValueError(f"latent attention: {hb} heads a program, not {HB} or {HB_WIDE}")
 +        raise ValueError(f"latent attention: {hb} heads a tile, not {HB} or {HB_WIDE}")
      _dense_chunks[(R, triton.cdiv(H, hb), nch)](qa, cache, pos, s.po[:n * LW], s.pm[:n], s.pl[:n], R, H=H, LW=LW,
                                                  CH=CHUNK, SCALE=scale, HBT=hb, KTT=KT, num_warps=8, num_stages=1)
      _merge[(R, H)](s.po, s.pm, s.pl, out, s.dummy, R, H=H, LW=LW, NCH=nch, SPARSE=False, num_warps=4)
-@@ -401,5 +493,32 @@ def sparse_attention(qa: torch.Tensor, cache: torch.Tensor, tokens: torch.Tensor
+@@ -404,5 +494,32 @@ def sparse_attention(qa: torch.Tensor, cache: torch.Tensor, tokens: torch.Tensor
      _merge[(R, H)](po, pm, pl, out, counts, R, H=H, LW=LW, NCH=nch, SPARSE=True, num_warps=4)
  
  
@@ -628,10 +636,10 @@ index 2e2a32e..62cc861 100644
  def chunks_for(length: int) -> int:
      return triton.cdiv(length, CHUNK)
 diff --git tensorfold/families/glm5_next/cuda/sparse.py tensorfold/families/glm5_next/cuda/sparse.py
-index 56582b8..124c75c 100644
+index a7930dd..a7a252d 100644
 --- tensorfold/families/glm5_next/cuda/sparse.py
 +++ tensorfold/families/glm5_next/cuda/sparse.py
-@@ -9,6 +9,8 @@ import triton.language as tl
+@@ -11,6 +11,8 @@ from tensorfold.cuda.geometry import MLA_SELECT_ROWS as SELECT_ROWS   # a prompt
  POOL = 4
  TOPK_POOLS = 512
  BR = 16
@@ -640,7 +648,7 @@ index 56582b8..124c75c 100644
  
  
  @triton.jit
-@@ -165,12 +167,55 @@ def pool_bucket(pos: int, R: int, np_max: int) -> int:
+@@ -177,12 +179,55 @@ def pool_bucket(pos: int, R: int, np_max: int) -> int:
      return min(np_max, max(1024, 1 << (visible - 1).bit_length()))
  
  
@@ -695,8 +703,8 @@ index 56582b8..124c75c 100644
 +        return _select_prompt(qi, wts, pk, pos, R, np_max, pos_dev)
      # score only visible pools, rounded up to a power of two so the allocator reuses a few sizes (exact sizes fragmented memory at 128k)
      np_max = bucket if bucket is not None else pool_bucket(pos, R, np_max)
-     scores = torch.empty((R, np_max), dtype=torch.float32, device=qi.device)
-@@ -195,6 +240,38 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
+     # rows scored SELECT_ROWS at a time over the window's np_max pools (the same columns, so the same bits a row)
+@@ -216,6 +261,38 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
      return tokens, counts
  
  

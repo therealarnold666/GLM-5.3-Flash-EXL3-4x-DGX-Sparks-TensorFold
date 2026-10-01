@@ -1,5 +1,5 @@
 diff --git tensorfold/cuda/kernels/qmm.cu tensorfold/cuda/kernels/qmm.cu
-index 2828909..5853a81 100644
+index c759255..5aa20ae 100644
 --- tensorfold/cuda/kernels/qmm.cu
 +++ tensorfold/cuda/kernels/qmm.cu
 @@ -56,9 +56,15 @@ __global__ void __launch_bounds__(WM * WN * 32) qmm_kernel(
@@ -21,7 +21,7 @@ index 2828909..5853a81 100644
          }
          unsigned char* ps = pw + T::W;
          for (int c = tid; c < 2 * (T::S / 16); c += T::THREADS) {
-@@ -306,7 +312,11 @@ void dispatch_cfg(int cfg, const at::Tensor& x, const at::Tensor& xs, const at::
+@@ -310,7 +316,11 @@ void dispatch_cfg(int cfg, const at::Tensor& x, const at::Tensor& xs, const at::
          case 9: launch<64, 16, 128, 1, 4, 6, F32, CLUSTER, true>(x, xs, w, s, b, out, part, N, SK); break;
          case 10: launch<64, 16, 64, 1, 2, 8, F32, CLUSTER>(x, xs, w, s, b, out, part, N, SK); break;
          case 11: launch<64, 16, 128, 1, 2, 6, F32, CLUSTER>(x, xs, w, s, b, out, part, N, SK); break;
@@ -35,10 +35,10 @@ index 2828909..5853a81 100644
  }
  
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index c4c8ab3..7f56f87 100644
+index c1fb8ce..adec331 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -415,7 +415,9 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -433,7 +433,9 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
                  glue.swiglu(b.sgu[lo:hi], b.sact[lo:hi], b.sxs[lo:hi], c.limit)
                  mm(b, b.sact[lo:hi], s.down, b.sxs[lo:hi], b.sy[lo:hi], f32=True)
              with prof.timed("moe: combine"):
@@ -218,7 +218,7 @@ index 0000000..2236475
 +    C10_CUDA_KERNEL_LAUNCH_CHECK();
 +}
 diff --git tensorfold/families/glm5_next/cuda/latent.py tensorfold/families/glm5_next/cuda/latent.py
-index fff0bf6..50a7372 100644
+index e6d7924..cfe50b3 100644
 --- tensorfold/families/glm5_next/cuda/latent.py
 +++ tensorfold/families/glm5_next/cuda/latent.py
 @@ -587,6 +587,12 @@ def _merge(PO, PM, PL, OUT, CNT, R, H: tl.constexpr, LW: tl.constexpr, NCH: tl.c
@@ -232,9 +232,9 @@ index fff0bf6..50a7372 100644
 +
 +
  class LatentScratch:
-     """Chunk partials for up to rows x heads x chunks, the absorbed queries and the attended latents."""
+     """Chunk partials for ``part_rows`` (one ``attention`` call) x heads x chunks; queries and latents for ``rows``."""
  
-@@ -615,7 +621,8 @@ def attention(qa: torch.Tensor, cache: torch.Tensor, pos: torch.Tensor, s: Laten
+@@ -616,7 +622,8 @@ def attention(qa: torch.Tensor, cache: torch.Tensor, pos: torch.Tensor, s: Laten
      if hb not in (HB, HB_WIDE):
          raise ValueError(f"latent attention: {hb} heads a tile, not {HB} or {HB_WIDE}")
      _dense_chunks[(R, triton.cdiv(H, hb), nch)](qa, cache, pos, s.po[:n * LW], s.pm[:n], s.pl[:n], R, H=H, LW=LW,
@@ -244,7 +244,7 @@ index fff0bf6..50a7372 100644
      _merge[(R, H)](s.po, s.pm, s.pl, out, s.dummy, R, H=H, LW=LW, NCH=nch, SPARSE=False, num_warps=4)
      return out
  
-@@ -632,7 +639,8 @@ def sparse_attention(qa: torch.Tensor, cache: torch.Tensor, tokens: torch.Tensor
+@@ -633,7 +640,8 @@ def sparse_attention(qa: torch.Tensor, cache: torch.Tensor, tokens: torch.Tensor
      pl = torch.empty((n,), dtype=torch.float32, device=qa.device)
      hb = head_block(R)
      _sparse_chunks[(R, triton.cdiv(H, hb), nch)](qa, cache, tokens, counts, po, pm, pl, R, W=W, H=H, LW=LW,
@@ -255,7 +255,7 @@ index fff0bf6..50a7372 100644
  
  
 diff --git tensorfold/families/glm5_next/cuda/qmm.py tensorfold/families/glm5_next/cuda/qmm.py
-index 7330c93..65e7921 100644
+index a3668ae..074a507 100644
 --- tensorfold/families/glm5_next/cuda/qmm.py
 +++ tensorfold/families/glm5_next/cuda/qmm.py
 @@ -350,7 +350,7 @@ def matmul(x: torch.Tensor, q: Q4 | B16, xs: torch.Tensor | None = None, *, out:
