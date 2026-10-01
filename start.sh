@@ -22,7 +22,8 @@
 #   nodes    WORKER, FABRIC_PEER, MASTER_PORT, NCCL_RAILS (1: one CX7 port), NCCL_CHANNELS, NCCL_DEBUG
 #   files    MODEL_ID, MODEL_REVISION, DFLASH2_ID, DFLASH2_REVISION, HF_CACHE (default: HF_HOME), KERNEL_CACHE,
 #            STATE_DIR, HF_HUB_OFFLINE=0 (let TensorFold reach the Hub; default serves from the local cache only)
-#   image    IMAGE, TF_VERSION, TF_REPO, BASE_IMAGE, GHCR_IMAGE, CONTAINER_NAME
+#   image    IMAGE, TF_VERSION, TF_REPO, BASE_IMAGE, GHCR_IMAGE, IMAGE_TAG / IMAGE_DIGEST (the pinned published
+#            image), CONTAINER_NAME
 #   setup    PREPARE (auto | 1 | 0), PULL, MIN_FREE_GB, IMAGE_FREE_GB, RSYNC_OPTS, HF_TOKEN (prepare.sh's downloads);
 #            FOREGROUND=1 (stay attached to rank 0's log, exit with its code); WAIT_TIMEOUT (seconds, default 1800);
 #            STOP_TIMEOUT (stop.sh)
@@ -123,7 +124,7 @@ if [[ "${PREPARE:-auto}" == 1 || ( "${PREPARE:-auto}" != 0 && "$(prepared_state 
   log "Not ready yet: running scripts/prepare.sh (the first time this pulls the image, downloads ~166 GiB and copies both to the worker)"
   ./scripts/prepare.sh
 else
-  log "Ready: $IMAGE and $MODEL_ID on both Sparks${PREPARE:+ (PREPARE=$PREPARE)}"
+  log "Ready: $IMAGE (patches $(image_hash)) and $MODEL_ID on both Sparks${PREPARE:+ (PREPARE=$PREPARE)}"
 fi
 why="scripts/prepare.sh did not"; [[ "${PREPARE:-auto}" == 0 ]] && why="PREPARE=0 skipped scripts/prepare.sh, which would"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing: $why build it"

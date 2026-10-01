@@ -14,7 +14,7 @@
 Serve **GLM-5.3-Flash** from two NVIDIA DGX Sparks (GB10, 128 GB each, linked by their ConnectX-7 ports) through an
 OpenAI-compatible API, with **4 concurrent requests**, the model's full **1,048,576-token context** and **image and
 video input**. It runs [TensorFold](https://github.com/ashhart/TensorFold) v0.5.0 on both Sparks (one rank on each)
-in NVIDIA's PyTorch container, plus 52 patches: DFlash2 and copy drafts, 4-bit dense weights, an FP8 KV cache,
+in NVIDIA's PyTorch container, plus 53 patches: DFlash2 and copy drafts, 4-bit dense weights, an FP8 KV cache,
 faster prompt kernels, a one-shot RoCE all-gather between the Sparks, several requests over one shared cache pool,
 vision, tool calling, `/tokenize` and `/metrics`.
 
@@ -160,9 +160,10 @@ A video is a `video_url` part (`{"type": "video_url", "video_url": {"url": "data
 | | Images | Videos |
 | --- | --- | --- |
 | Formats | JPEG, PNG, WebP | MP4, WebM, MOV, MKV (anything FFmpeg decodes) |
-| Per request | up to 4, 10 MB each, 20 MB in all | up to 2, 64 MB each, 96 MB in all, up to an hour of footage |
-| Tokens | at most 2,048 a picture (`TENSORFOLD_GLM_IMAGE_TOKENS`; a 1080p picture takes 2,040) | 2 frames a second, at most 128 frames spread over the whole clip (`TENSORFOLD_GLM_VIDEO_FRAMES`), at most 16,384 tokens a clip (`TENSORFOLD_GLM_VIDEO_TOKENS`) |
+| Per request | up to 50 (`TENSORFOLD_GLM_MAX_IMAGES`), 10 MB each, 64 MB in all | up to 4 (`TENSORFOLD_GLM_MAX_VIDEOS`), 64 MB each, 96 MB in all, up to an hour of footage each |
+| Tokens | at most 2,048 a picture (`TENSORFOLD_GLM_IMAGE_TOKENS`; a 1080p picture takes 2,040); a request's pictures share 16,384 (`TENSORFOLD_GLM_REQUEST_IMAGE_TOKENS`), so past 8 each gets an equal share (327 with 50) | 2 frames a second, at most 128 frames spread over the whole clip (`TENSORFOLD_GLM_VIDEO_FRAMES`), at most 16,384 tokens a clip (`TENSORFOLD_GLM_VIDEO_TOKENS`); a request's clips share 32,768 (`TENSORFOLD_GLM_REQUEST_VIDEO_TOKENS`), so 3 or 4 clips get 10,922 or 8,192 each |
 
+A request body can be up to 96 MiB, so data URLs carry about 70 MB of pictures and clips in all.
 By default only data URLs are accepted; `VISION_URLS=1` also lets the server fetch public `https://` URLs.
 `VISION=0` serves text only and leaves the tower's ~1.8 GiB on rank 0 to the cache.
 
@@ -191,8 +192,10 @@ the progress lines, the window retry or the smoke test; when either rank ends, i
 1. Preflight on both Sparks: Docker, the GPU, `rsync`, key-based ssh, the RoCE link, disk space.
 2. The image `tensorfold-glm53:v0.5.0` on the head: TensorFold v0.5.0 with every `patches/*.patch` applied, plus PyAV
    (video decoding) and xgrammar (structured outputs), on NVIDIA's `nvcr.io/nvidia/pytorch:26.07-py3`. It first
-   pulls `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold:v0.5.0-<image hash>` (the hash covers the
-   patches and those pip packages); without that tag (e.g. after you change `patches/`), or with `PULL=0`, it builds.
+   pulls the published image `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold:v0.5.0-<image hash>`,
+   by the digest pinned in `scripts/config.sh` (`IMAGE_TAG` / `IMAGE_DIGEST`) while the patches are this release's
+   (the hash covers the patches and those pip packages); after you change `patches/`, it pulls that hash's tag if
+   one is published, else (or with `PULL=0`) it builds.
 3. The same image on the worker: pulled, else streamed from the head (`docker save | docker load`), checked identical.
 4. The checkpoint, and DFlash2 with `DRAFTER=dflash2`, downloaded into `~/.cache/huggingface` on the head at their
    pinned revisions (the checkpoint checked with `tensorfold info`), then copied to the worker with `rsync` over ssh
@@ -273,6 +276,8 @@ sets a value wins: the environment, then `scripts/local.sh`, then `.env`, then t
 | `MULTI_PREFILL` | `1` | prompts that arrive together are filled in one forward (each with the bits it gets alone); `0`: one after another |
 | `SERVED_NAME` / `PORT` / `HOST` | `GLM-5.3-Flash-EXL3` / `8888` / `0.0.0.0` | the model id in `/v1/models` and replies; where the API listens |
 | `TENSORFOLD_GLM_IMAGE_TOKENS` / `_VIDEO_TOKENS` / `_VIDEO_FRAMES` | `2048` / `16384` / `128` | a picture's and a clip's token caps, and a clip's frames |
+| `TENSORFOLD_GLM_MAX_IMAGES` / `_MAX_VIDEOS` | `50` / `4` | pictures and clips a request |
+| `TENSORFOLD_GLM_REQUEST_IMAGE_TOKENS` / `_REQUEST_VIDEO_TOKENS` | `16384` / `32768` | tokens a request's pictures and clips share (each still within its own cap) |
 | `PREPARE` / `PULL` | `auto` / `1` | `start.sh` runs `scripts/prepare.sh` when needed (`1` always, `0` never); `prepare.sh` tries the prebuilt image first (`0`: always build locally) |
 | `WAIT_TIMEOUT` / `STOP_TIMEOUT` | `1800` / `30` | seconds `start.sh` waits for the server, and `stop.sh` gives it to shut down |
 
@@ -344,7 +349,7 @@ applied with `patch -p0` in filename order); `start.sh` rebuilds or re-pulls the
 | Drafts, tooling | `0011-glm-draft-sim` | records of DFlash2's drafts for an offline simulator of stop rules (`TF_GLM_DRAFT_DUMP`, off) | how the stop rules were tuned |
 | Concurrent requests | `0028-glm-multi-kda`, `0029-glm-multi-dflash2`, `0032-glm-multi-dsa`, `0033-glm-multi-stream-engine`, `0038-glm-multi-rounds`, `0043-glm-parallel-deadlocks`, `0044-glm-parallel-ring-base`, `0051-glm-timing-tokens`, `0052-glm-multi-prefill` | several streams over one shared pool of per-token caches, one batched verify window a round, both ranks kept in step; prompts that arrive together filled in one forward (`MULTI_PREFILL`: 4 prose requests at once 103.4 -> 108.8 tok/s, first token 590 -> 340 ms); a request alone on the one-stream graphs (`TF_GLM_MULTI_LONE`: +0.6-0.9%); the startup timings of verify windows on distinct tokens | 4 requests at once ([Performance](#performance)) |
 | Sampling | `0037-cuda-nucleus-union` | a top_p draw from both ranks' candidates together, the same draw with fewer whole-shard reads (`TENSORFOLD_NUCLEUS_UNION=1`, off by default) | opt-in |
-| Server | `0003-glm-vision`, `0039-glm-tool-calls`, `0040-cuda-tokenize`, `0024-server-effort-max`, `0025-cuda-memory-reserve`, `0047-cuda-context-errors`, `0048-cuda-metrics` | GLM's image and video processors and vision tower; GLM tool calls for agent clients; `/tokenize` and `/detokenize`; `reasoning_effort: "max"`; a settable host reserve; context-window refusals with code `context_length_exceeded` and Prometheus `/metrics` (both ported from TensorFold v0.6.0) | the API features above |
+| Server | `0003-glm-vision`, `0053-glm-many-media`, `0039-glm-tool-calls`, `0040-cuda-tokenize`, `0024-server-effort-max`, `0025-cuda-memory-reserve`, `0047-cuda-context-errors`, `0048-cuda-metrics` | GLM's image and video processors and vision tower; up to 50 pictures and 4 clips a request in 96 MiB bodies; GLM tool calls for agent clients; `/tokenize` and `/detokenize`; `reasoning_effort: "max"`; a settable host reserve; context-window refusals with code `context_length_exceeded` and Prometheus `/metrics` (both ported from TensorFold v0.6.0) | the API features above |
 
 ## Checks
 
@@ -375,6 +380,7 @@ scripts/      config.sh (all settings), local.sh.example (this setup's WORKER), 
               banner.sh (start.sh's banner)
 patches/      patches baked into the image
 tools/        benchmark and checks
+CHANGELOG.md  what changed in each release
 CREDITS.md    who and what this builds on
 LICENSE       Apache License 2.0
 NOTICE        third-party notices (TensorFold's MIT and Apache-2.0 notices, b12x, glm53-tensorfold-spark, ShapleyMcg)

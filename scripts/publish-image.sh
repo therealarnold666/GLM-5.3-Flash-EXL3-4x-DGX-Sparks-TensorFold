@@ -37,4 +37,7 @@ trap 'rm -rf -- "$login_dir"' EXIT
 echo "$token" | DOCKER_CONFIG="$login_dir" docker login ghcr.io -u "$user" --password-stdin >/dev/null
 DOCKER_CONFIG="$login_dir" docker push "$GHCR_IMAGE:$tag"
 DOCKER_CONFIG="$login_dir" docker push "$GHCR_IMAGE:latest"
+digest=$(docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$GHCR_IMAGE:$tag" | grep -m1 "^$GHCR_IMAGE@" |
+         cut -d@ -f2)
 log "Done: docker pull $GHCR_IMAGE:$tag"
+log "Pin it in scripts/config.sh: IMAGE_TAG=$tag IMAGE_DIGEST=$digest"

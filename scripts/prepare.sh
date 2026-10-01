@@ -70,7 +70,7 @@ log "Disk: $(free_gb "$HF_CACHE") GB free under $HF_CACHE here, $(worker_free_gb
 # ---------------------------------------------------------------- 2. image (head)
 # Local fixes in ./patches (unified diffs against site-packages, applied with patch -p0) are baked into the image.
 # The image is rebuilt when they (or IMAGE_EXTRAS) change; the TensorFold install layer stays cached, so that takes seconds.
-prebuilt="$GHCR_IMAGE:${TF_VERSION}-${PATCHES_HASH}"
+prebuilt=$(prebuilt_image)            # the pinned digest (config.sh's IMAGE_TAG / IMAGE_DIGEST), else the hash's tag
 if [[ $REBUILD -eq 0 && "${PULL:-1}" == 1 && "$built_hash" != "$PATCHES_HASH" ]]; then
   log "Pulling the prebuilt image $prebuilt (PULL=0 builds instead)"
   if docker pull "$prebuilt" &&

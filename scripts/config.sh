@@ -47,6 +47,16 @@ IMAGE="${IMAGE:-tensorfold-glm53:${TF_VERSION}}"
 IMAGE_EXTRAS="av==18.1.0 xgrammar>=0.2.8,<0.3"
 image_hash() { (cat patches/*.patch 2>/dev/null; echo "$IMAGE_EXTRAS") | sha256sum | cut -c1-12; }
 GHCR_IMAGE="${GHCR_IMAGE:-ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold}"
+# The published image of this release's patches, pinned: prepare.sh pulls it by digest (a tag can be moved, a digest
+# cannot) while patches/*.patch and IMAGE_EXTRAS still hash to IMAGE_TAG's hash. Other patches pull
+# $GHCR_IMAGE:<TF_VERSION>-<hash> when one is published, else build locally. scripts/publish-image.sh prints both.
+IMAGE_TAG="${IMAGE_TAG:-v0.5.0-cb7c56f7f921}"
+IMAGE_DIGEST="${IMAGE_DIGEST:-sha256:6ee3c6e0430040b69ddcb0c96c7fbbcb94a5bed47d48a8ba092626369ae533b9}"
+# the registry reference prepare.sh pulls for these patches: the pinned digest, or the hash's tag
+prebuilt_image() {
+  local tag="${TF_VERSION}-$(image_hash)"
+  if [[ "$tag" == "$IMAGE_TAG" && -n "$IMAGE_DIGEST" ]]; then echo "$GHCR_IMAGE@$IMAGE_DIGEST"; else echo "$GHCR_IMAGE:$tag"; fi
+}
 CONTAINER_NAME="${CONTAINER_NAME:-glm53-flash-tf}"           # the same name on both Sparks
 
 SERVED_NAME="${SERVED_NAME:-GLM-5.3-Flash-EXL3}"
