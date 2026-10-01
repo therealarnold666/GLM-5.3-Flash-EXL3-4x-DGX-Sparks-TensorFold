@@ -100,7 +100,7 @@ THINKING="${THINKING:-1}"
 # as Codex sets none). A request's own value wins; this one is cut to what the window has left, never refused.
 MAX_TOKENS="${MAX_TOKENS:-32768}"
 # The checkpoint's BF16 weights (attention, shared experts, dense layers, head: ~9.7 GiB a Spark):
-#   q4 (default): the projections as affine 4-bit groups of 64 with MSE-searched ranges, the head and kv_b in FP8
+#   q4 (default): the projections as affine 4-bit groups of 64 with MSE-searched ranges, the head in FP8 (kv_b stays BF16: TF_GLM_KVB)
 #        (patches 0002, 0005). Over fp8 (DFlash2, one boot each): prose 38.9 -> 44.4 tok/s, code 44.2 -> 48.7, prefill
 #        ~1,090 -> ~1,260 tok/s; GSM8K 98.0% and HumanEval 95.1% on both (bf16: 97.2 / 96.3). Lossy: replies differ.
 #   fp8: FP8 e4m3 with a scale per row and 128 columns (patch 0002), half bf16's bytes: ~+33% decode over bf16.
@@ -151,6 +151,11 @@ export TF_GLM_WIDE_GRAPHS="$_w" TF_GLM_COPY_REPLY_MATCH="$_w"
 # kept prompts there, so interactive sessions miss the prompt cache and re-read whole histories (issues #12, #13).
 # Off by default until that move keeps them. Exact either way.
 export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-0}"
+# Kept prompt states (TensorFold's TF_GLM_CACHE_ENTRIES, 8 by default): the oldest is dropped past this count, however
+# much of the pool is free. A drafted agent request keeps 1 to 3 (its own plus shared-prefix states), so 8 let three
+# or four alternating conversations push each other out (issue #17). Each entry reserves its fixed state (~45 MiB) at
+# start: 32 takes ~1 GiB more than 8.
+export TF_GLM_CACHE_ENTRIES="${TF_GLM_CACHE_ENTRIES:-32}"
 # Waiting prompts filled together in one forward (patch 0049): shared work (expert weights, glue, projections) runs once
 # for every waiting prompt, attention per prompt on its own state, so each gets the bits it gets alone. sparkDash, prose at
 # 4 at once: 103.4 -> 108.8 tok/s, time to first token 590 -> 340 ms; structured at 3 / 4 at once: 175.2 -> 196.3 and
