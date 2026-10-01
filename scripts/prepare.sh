@@ -194,7 +194,8 @@ for id in "${models[@]}"; do
   worker "mkdir -p '$wdir/refs' '$wdir/snapshots'"
   # the blobs this revision uses, then its snapshot links and refs/main (the cache layout huggingface_hub keeps)
   (cd "$dir" && find "snapshots/$rev" -type l -printf '%l\n' | sed 's#^\(\.\./\)*##' | sort -u) > "$STATE_DIR/blobs"
-  rsync -a --partial --files-from="$STATE_DIR/blobs" "$dir/" "$WORKER:$wdir/" \
+  # -L: a blob may itself be a link into the cache root's blobs/ (huggingface_hub's xet backend, issue #15)
+  rsync -a -L --partial --files-from="$STATE_DIR/blobs" "$dir/" "$WORKER:$wdir/" \
     -e "ssh -o BatchMode=yes" ${RSYNC_OPTS:-}
   rsync -a "$dir/snapshots/$rev" "$WORKER:$wdir/snapshots/" -e "ssh -o BatchMode=yes"
   # refs/main as the head has it (with a pin: only when the worker has none)

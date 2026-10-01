@@ -87,10 +87,29 @@ worker_link_info() { worker "$(declare -f link_info); link_info $1"; }
 # HEAD_ADDR / HEAD_DEV / HEAD_HCA / HEAD_GID and WORKER_ADDR / WORKER_DEV / WORKER_HCA / WORKER_GID: the link the two
 # ranks talk over (NCCL and the rendezvous). FABRIC_PEER overrides the worker's link address when WORKER is reached
 # over another network.
+# cx7_peer: the worker's address on a CX7 port that one of this node's CX7 ports reaches directly (same subnet, no
+# gateway), for a WORKER given by its LAN address (issue #9). Empty when there is none.
+cx7_peer() {
+  local a route dev
+  for a in $(worker 'for d in /sys/class/net/*; do [ -d "$d/device/infiniband" ] && ip -o -4 addr show dev "${d##*/}"; done' 2>/dev/null |
+             awk '{print $4}' | cut -d/ -f1); do
+    route=$(ip -o -4 route get "$a" 2>/dev/null) || continue
+    [[ "$route" == *" via "* ]] && continue
+    dev=$(sed -n 's/.* dev \([^ ]*\).*/\1/p' <<<"$route")
+    [[ -d /sys/class/net/$dev/device/infiniband ]] && { echo "$a"; return 0; }
+  done
+  return 1
+}
 detect_link() {
-  local peer=${FABRIC_PEER:-${WORKER#*@}}
+  local peer=${FABRIC_PEER:-${WORKER#*@}} cx7
   read -r HEAD_ADDR HEAD_DEV HEAD_HCA HEAD_GID <<<"$(link_info "$peer")" || true
   [[ -n "${HEAD_ADDR:-}" ]] || die "no route from this node to $peer"
+  # WORKER given by a LAN address (the route goes out a port without RoCE): use the worker's CX7 address instead
+  if [[ -z "${FABRIC_PEER:-}" && "${HEAD_HCA:--}" == "-" ]] && cx7=$(cx7_peer); then
+    log "$peer is reached over $HEAD_DEV, not a CX7 port: using the worker's CX7 address $cx7 for the link (FABRIC_PEER)"
+    peer=$cx7
+    read -r HEAD_ADDR HEAD_DEV HEAD_HCA HEAD_GID <<<"$(link_info "$peer")" || true
+  fi
   read -r WORKER_ADDR WORKER_DEV WORKER_HCA WORKER_GID <<<"$(worker_link_info "$HEAD_ADDR")" || true
   [[ -n "${WORKER_ADDR:-}" ]] || die "the worker has no route back to $HEAD_ADDR"
   # both CX7 ports when both are cabled and addressed: a prompt chunk's all-gather is ~1.8x faster on two rails
