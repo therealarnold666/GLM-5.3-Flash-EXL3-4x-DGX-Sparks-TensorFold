@@ -3,6 +3,23 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.3.2 (2026-10-01): more kept prompts, a note on non-English prompts
+
+Image unchanged: `v0.6.0-ae8d1c789b47`.
+
+### Changed
+- **`TF_GLM_CACHE_ENTRIES` 8 -> 32** (#17): the engine kept at most 8 prompt states and dropped the oldest past that,
+  however much of the pool was free. An agent request keeps 1 to 3 (its own state plus shared-prefix states), so three
+  or four alternating agent conversations pushed each other out. Each entry reserves ~45 MiB at start, ~1 GiB more in
+  all. Reported, with measurements, by @sm373373. The setting is now documented.
+
+### Docs
+- **`DENSE=q4` and non-English prompts** (#18): on short French coding prompts `q4` often loses the end of turn and
+  runs to `max_tokens` (12 of 48 replies, against 1 of 48 with `bf16` or `fp8`); the README says so and points to
+  `DENSE=fp8`. A calibrated 4-bit for the dense weights, at `q4`'s speed, is being worked on. Reported, with
+  measurements, by @Alexbob0.
+- `DENSE=q4` keeps `kv_b` in BF16 (the docs said FP8).
+
 ## v1.3.1 (2026-10-01): prompt cache in interactive sessions, setup fixes
 
 Image unchanged: `v0.6.0-ae8d1c789b47`.
