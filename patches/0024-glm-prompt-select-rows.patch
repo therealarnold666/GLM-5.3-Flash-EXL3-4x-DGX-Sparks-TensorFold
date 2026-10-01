@@ -1,30 +1,8 @@
-diff --git tensorfold/cuda/geometry.py tensorfold/cuda/geometry.py
-index 82b565f..8f633f8 100644
---- tensorfold/cuda/geometry.py
-+++ tensorfold/cuda/geometry.py
-@@ -240,7 +240,8 @@ def mla_chunk_scratch(t: dict, world: int, capacity: int, *, latent: bool, prefi
-     """A prompt chunk's transient bytes: token selection (fp32 pool scores, chosen pools, token lists), then sparse attention's partials."""
- 
-     heads, topk = int(t["num_attention_heads"]) // world, int(t.get("index_topk", 2048))
--    select = prefill_rows * (4 * ((capacity + 3) // 4) + 16 * (topk + 3))
-+    # the fp32 pool scores of at most 512 rows at once (glm5_next sparse.SELECT_ROWS), the token lists of the chunk's
-+    select = min(prefill_rows, 512) * 4 * ((capacity + 3) // 4) + prefill_rows * 16 * (topk + 3)
-     if latent:
-         return select + ((topk + 515) // 512) * prefill_rows * heads * (int(t.get("kv_lora_rank", 512)) + 2) * 4
-     kd = int(t["qk_nope_head_dim"]) + int(t.get("qk_rope_head_dim", 0))
 diff --git tensorfold/families/glm5_next/cuda/sparse.py tensorfold/families/glm5_next/cuda/sparse.py
-index 124c75c..616632a 100644
+index a7a252d..73cc902 100644
 --- tensorfold/families/glm5_next/cuda/sparse.py
 +++ tensorfold/families/glm5_next/cuda/sparse.py
-@@ -168,6 +168,7 @@ def pool_bucket(pos: int, R: int, np_max: int) -> int:
- 
- 
- PROMPT_ROWS = 64          # windows from this many rows (prompt chunks, eager) take the prompt selection below
-+SELECT_ROWS = 512         # a prompt chunk's rows scored at once (the fp32 pool scores grow with the capacity)
- 
- 
- def pool_count(pos: int, R: int, np_max: int) -> int:
-@@ -255,20 +256,28 @@ def _select_prompt(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: i
+@@ -276,20 +276,28 @@ def _select_prompt(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: i
  
      dev = qi.device
      NP = pool_count(pos, R, np_max)

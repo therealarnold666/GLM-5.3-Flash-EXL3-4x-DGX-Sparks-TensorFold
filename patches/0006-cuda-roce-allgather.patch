@@ -1010,10 +1010,10 @@ index 0000000..5e605ae
 +    free(c);
 +}
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 0ed6ec3..cb8d750 100644
+index 6492798..53ddda9 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -123,6 +123,15 @@ class GlmEngine:
+@@ -148,6 +148,15 @@ class GlmEngine:
          self.serial_only = serial_only
          self.comm = comm if comm is not None else NCCL(rank, 2, master, port)
          self.comm.barrier()
@@ -1029,7 +1029,7 @@ index 0ed6ec3..cb8d750 100644
          cfg = Config.read(model_dir)
          # Without --context the window stays dense, attending every key without indexer work.
          explicit = context is not None if context_explicit is None else bool(context_explicit)
-@@ -526,6 +535,8 @@ class GlmEngine:
+@@ -589,6 +598,8 @@ class GlmEngine:
              self._share(positions)
          stats = self._run(list(prompt), max_tokens, sampling, stop_eos, on_tokens, code, hit, draft, constraint, feed)
          stats.update(policy=spec, drafts=draft)
@@ -1038,7 +1038,7 @@ index 0ed6ec3..cb8d750 100644
          if feed is not None:
              stats.update(image_rows=len(positions), encode_s=round(feed.encode_s, 3))
          return stats
-@@ -557,6 +568,8 @@ class GlmEngine:
+@@ -621,6 +632,8 @@ class GlmEngine:
                      raise RuntimeError(f"rank 1 has no snapshot of the {cached} tokens rank 0 resumes from")
              self._run(prompt, max_tokens, sampling, bool(stop_eos), lambda new: None, code, hit, bool(draft),
                        constraint, feed)

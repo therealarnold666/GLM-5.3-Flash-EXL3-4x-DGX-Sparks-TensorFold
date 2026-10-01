@@ -1,8 +1,8 @@
 diff --git tensorfold/cuda/geometry.py tensorfold/cuda/geometry.py
-index 49f10d0..afce1d7 100644
+index 0306412..d5ee33a 100644
 --- tensorfold/cuda/geometry.py
 +++ tensorfold/cuda/geometry.py
-@@ -195,6 +195,28 @@ def _indexed_prefill_row(t: dict, world: int, h: int, hk: int, hd: int, nv: int,
+@@ -220,6 +220,28 @@ def _indexed_prefill_row(t: dict, world: int, h: int, hk: int, hd: int, nv: int,
              + 12 * streams + 64)
  
  
@@ -31,7 +31,7 @@ index 49f10d0..afce1d7 100644
  def exl3_expert_scratch(rows: int, slots: int, d: int, width: int, *, prompt: bool) -> int:
      """GLM's ``exl3_mm.Scratch`` for a window of ``rows`` rows: fp16 rotated inputs of gate/up (2 x pairs x d) and down
      (pairs x ``width``, a rank's expert width); a decode window's fp32 split-K sums (2 x 4 splits x pairs x
-@@ -209,12 +231,13 @@ def exl3_expert_scratch(rows: int, slots: int, d: int, width: int, *, prompt: bo
+@@ -234,12 +256,13 @@ def exl3_expert_scratch(rows: int, slots: int, d: int, width: int, *, prompt: bo
  
  def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560, latent: bool = False,
                   prefill_rows: int = PREFILL_ROWS, mtp: bool | None = None, onepass: bool = False,
@@ -47,7 +47,7 @@ index 49f10d0..afce1d7 100644
      linear, attention = layer_counts(t)
      lin = t.get("linear_attn_config") or {}
      heads = int(t["num_attention_heads"]) // world
-@@ -244,19 +267,23 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
+@@ -269,19 +292,23 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
          fixed += 8 * prefill_rows * 16384 * 4 if prompt_split_k else 0
      count = attention + int(mtp)
      lw = int(t.get("kv_lora_rank", 512))
@@ -74,7 +74,7 @@ index 49f10d0..afce1d7 100644
      return Geometry(bytes_at, reserve, minimum_slots)
  
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 6732311..813f4c0 100644
+index ed74101..2382093 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -85,13 +85,14 @@ class Engine:
@@ -117,7 +117,7 @@ index 6732311..813f4c0 100644
          self.slots = Slots(w, streams, max_rows)
          self.home = self.st = State(w, capacity, max_rows, caches=self.caches, slots=self.slots)
          self.last_hidden: torch.Tensor | None = None
-@@ -287,35 +294,74 @@ class Snapshot:
+@@ -287,16 +294,55 @@ class Snapshot:
      rows: list | None = None      # the attention rows of ids, saved when another conversation took the live caches
      nbytes: int = 0
      drafter_rows: list | None = None  # a ring drafter's window rows before drafter_end, copied when taken
@@ -176,6 +176,7 @@ index 6732311..813f4c0 100644
      if drafter is not None and getattr(drafter, "ring", 0) and snap.drafter_end == len(snap.ids):
          snap.drafter_rows = _ring_window(drafter, len(snap.ids))
      return snap
+@@ -324,19 +370,19 @@ def _put_ring_window(drafter, n: int, rows: list[torch.Tensor]) -> None:
  
  
  def _row_views(st, n: int, m: int) -> list[torch.Tensor]:
@@ -200,12 +201,11 @@ index 6732311..813f4c0 100644
      return views
  
  
-@@ -374,9 +420,10 @@ def row_bytes(e: Engine, snap: Snapshot, drafter=None) -> int:
+@@ -374,8 +420,10 @@ def row_bytes(e: Engine, snap: Snapshot, drafter=None) -> int:
  
  
  def snapshot_bytes(snap: Snapshot) -> int:
--    """Device memory a kept snapshot holds: its KDA states, conv windows, pending MTP rows, a ring drafter's window
--    and any saved rows."""
+-    """A kept snapshot's device bytes: KDA states, conv windows, pending MTP rows, a ring window, saved rows."""
 +    """Device memory a kept snapshot holds: its KDA states, conv windows, pending MTP rows, a ring drafter's window,
 +    the indexer rings' tail and any saved rows."""
      held = [snap.rec, snap.conv] + ([snap.pending] if snap.pending is not None else []) + (snap.drafter_rows or [])
@@ -213,7 +213,7 @@ index 6732311..813f4c0 100644
      return sum(t.numel() * t.element_size() for t in held) + (snap.nbytes if snap.rows is not None else 0)
  
  
-@@ -391,6 +438,7 @@ def load_rows(e: Engine, snap: Snapshot, drafter=None) -> None:
+@@ -390,6 +438,7 @@ def load_rows(e: Engine, snap: Snapshot, drafter=None) -> None:
  
  def restore(e: Engine, snap: Snapshot, drafter=None) -> None:
      st = e.st
@@ -222,10 +222,10 @@ index 6732311..813f4c0 100644
          st.rec[st.cur[0]].copy_(snap.rec)
      st.conv.copy_(snap.conv)
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 8154dc6..b357ce2 100644
+index 32c01f3..2524b65 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -388,7 +388,7 @@ class GlmEngine:
+@@ -384,7 +384,7 @@ class GlmEngine:
          from .split import rule
          from tensorfold.cuda.capacity import admit
          from tensorfold.cuda.geometry import (PREFILL_ROWS, dflash2_geometry, dflash2_weights, mla_geometry,
@@ -234,7 +234,7 @@ index 8154dc6..b357ce2 100644
  
          encode_policy(policy)                           # a bad default fails here, not in the first request
          if not encode_policy(DFLASH_POLICY)[0] >= 10:
-@@ -439,6 +439,13 @@ class GlmEngine:
+@@ -435,6 +435,13 @@ class GlmEngine:
          # TF_GLM_KVB=fp8/q4 (an EXL3 checkpoint, latent cache): kv_b as the absorb and expand kernels read it
          kvb = kvb_kind() if cfg.quant == "exl3" and LATENT else "bf16"
          weights_estimate = kvb_weights(weights_estimate, kvb)
@@ -245,10 +245,10 @@ index 8154dc6..b357ce2 100644
 +        if kv != "bf16" and not LATENT:
 +            raise ValueError("TF_GLM_KV=fp8 holds the latent cache: it needs TF_GLM_LATENT=1")
 +        self.kv = kv
-         # TF_GLM_MTP (``mtp_head``): off, the MTP layer's tensors are not loaded, so the estimate drops them too
+         # TF_GLM_MTP off: the MTP layer's tensors, caches and buffers are neither loaded nor estimated
          self.mtp_on = mtp_head(drafter is not None, serial_only, cfg.mtp_layers) and parallel == 1   # multi: DFlash2
          if not self.mtp_on:
-@@ -472,11 +479,11 @@ class GlmEngine:
+@@ -468,11 +475,11 @@ class GlmEngine:
  
              g = mla_geometry(text, 2, MAX_ROWS, minimum_slots=DENSE_CAPACITY, latent=LATENT, prefill_rows=prefill_rows,
                               mtp=self.mtp_on, onepass=SPARSE_ONEPASS, exl3_prompt=prompt_kernels(),
@@ -262,7 +262,7 @@ index 8154dc6..b357ce2 100644
              per = 4 * MULTI_WINDOW // 4 if parallel > 1 else 0
              if not extra and not per:
                  return g
-@@ -523,7 +530,8 @@ class GlmEngine:
+@@ -519,7 +526,8 @@ class GlmEngine:
                  prefill_rows, self.grid, KVB_KINDS.index(kvb)] + (self.copy.code() if self.copy is not None else [0, 0, 0, 0]) + \
              self.split.code() + [int(self.dump is not None), quant_code, self.shared, int(DRAFT_RING), int(self.mtp_on),
                                   parallel, *verify_code, int(union_cover()), MAX_ROWS, len(WIDE_GRAPHS),
@@ -272,7 +272,7 @@ index 8154dc6..b357ce2 100644
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
          wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -535,7 +543,7 @@ class GlmEngine:
+@@ -531,7 +539,7 @@ class GlmEngine:
                                 "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_DRAFT_DUMP, "
                                 "TF_GLM_DRAFT_QUANT, TF_GLM_SHARED_PREFIX, TF_GLM_DRAFT_RING, TF_GLM_MTP, --parallel, "
                                 "TF_GLM_MULTI_VERIFY, TF_GLM_MULTI_SAMPLER / _DEPTH / _OVERHEAD_MS / _ASYNC / _LONE, "
@@ -281,7 +281,7 @@ index 8154dc6..b357ce2 100644
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
                                 "(or pass --drafter none to both) and give both the same flags")
          self.cache_bytes = min(both[0][-1], both[1][-1]) << 20
-@@ -585,7 +593,7 @@ class GlmEngine:
+@@ -582,7 +590,7 @@ class GlmEngine:
          self.e = Engine(w, capacity=pool_rows or capacity, max_rows=MAX_ROWS, prefill_rows=prefill_rows, graphs=True,
                          graph_rows=GRAPH_ROWS + WIDE_GRAPHS, long_context=long_context,
                          taps=self.drafter.tap_layers if self.drafter is not None else (), grid=self.grid,
@@ -290,7 +290,7 @@ index 8154dc6..b357ce2 100644
          if self.e.pbuf.split is not None:
              self.e.pbuf.split.warm()                 # both ranks: open the send/receive connection now
              if rank == 0:
-@@ -601,6 +609,9 @@ class GlmEngine:
+@@ -598,6 +606,9 @@ class GlmEngine:
          if rank == 0 and self.dump is not None:
              print(f"[tensorfold] TF_GLM_DRAFT_DUMP: DFlash2 requests decode serially and record the drafter's view "
                    f"into {self.dump} (one .npz a request; replies equal draft: false)", flush=True)
@@ -301,11 +301,11 @@ index 8154dc6..b357ce2 100644
              print("[tensorfold] TF_GLM_DRAFT_QUANT=mse: DFlash2's 4-bit copies (and an EXL3 draft head) with "
                    "least-squares clipped ranges", flush=True)
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index ef785e7..c6967f8 100644
+index 79a1ec9..1aab97c 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -11,7 +11,7 @@ import triton.language as tl
- from tensorfold.cuda import experts as grouped
+@@ -12,7 +12,7 @@ from tensorfold.cuda import experts as grouped
+ from tensorfold.cuda.geometry import MLA_PROMPT_ATT_ROWS as PROMPT_ATT_ROWS   # a dense latent call's prompt rows
  from tensorfold.cuda.kernels import prefill_attention, qmm as shared
  
 -from . import glue, kda as kda_mod, latent, prof, qmm, sparse
@@ -313,7 +313,7 @@ index ef785e7..c6967f8 100644
  from .attention import AttnScratch, attention, kv_write
  from .weights import LayerW, Weights
  
-@@ -160,13 +160,28 @@ class Buffers:
+@@ -161,13 +161,28 @@ class Buffers:
          return p
  
  
@@ -344,7 +344,7 @@ index ef785e7..c6967f8 100644
          from .pool import Arena, Plane
  
          c = w.cfg
-@@ -174,15 +189,21 @@ class Caches:
+@@ -175,15 +190,21 @@ class Caches:
          HL = c.heads // w.world
          dsa = len([l for l in w.layers if l.kind == "dsa"])
          self.latent = latent.ENABLED
@@ -369,7 +369,7 @@ index ef785e7..c6967f8 100644
              return add((HL, c.qk_dim)), add((HL, c.v_dim))
  
          self.kc, self.vc = [], []
-@@ -191,14 +212,42 @@ class Caches:
+@@ -192,14 +213,42 @@ class Caches:
              self.kc.append(k)
              self.vc.append(v)
          self.mtp = attention_planes() if w.mtp is not None else None
@@ -414,7 +414,7 @@ index ef785e7..c6967f8 100644
      def bind(self, st: "State", base: int, size: int) -> None:
          """Point ``st``'s caches at tokens [base, base + size) of the pool."""
  
-@@ -207,7 +256,14 @@ class Caches:
+@@ -208,7 +257,14 @@ class Caches:
          st.vc = [view(i) for i in self.vc]
          if self.mtp is not None:
              st.mtp_kc, st.mtp_vc = view(self.mtp[0]), view(self.mtp[1])
@@ -430,7 +430,7 @@ index ef785e7..c6967f8 100644
  
  
  class Slots:
-@@ -257,8 +313,8 @@ class State:
+@@ -258,8 +314,8 @@ class State:
      own (one sequence of ``capacity`` tokens, one slot), as it always held tensors of its own."""
  
      def __init__(self, w: Weights, capacity: int, rows: int, *, caches: Caches | None = None, base: int = 0,
@@ -441,7 +441,7 @@ index ef785e7..c6967f8 100644
          self.slots = slots if slots is not None else Slots(w, 1, rows)
          self.slot = slot
          kda_layers = [l for l in w.layers if l.kind == "kda"]
-@@ -287,6 +343,11 @@ class State:
+@@ -288,6 +344,11 @@ class State:
          self.base, self.capacity = int(base), int(capacity)
          self.caches.bind(self, self.base, self.capacity)
  
@@ -1120,12 +1120,12 @@ index 91b3d06..ae8b0d9 100644
  
          t, R = self.fill(segments, sparse_from=sparse_from)
 diff --git tensorfold/families/glm5_next/cuda/sparse.py tensorfold/families/glm5_next/cuda/sparse.py
-index 59c274b..bc5362a 100644
+index acfc069..ea3ade3 100644
 --- tensorfold/families/glm5_next/cuda/sparse.py
 +++ tensorfold/families/glm5_next/cuda/sparse.py
-@@ -6,6 +6,9 @@ import torch
- import triton
- import triton.language as tl
+@@ -8,6 +8,9 @@ import triton.language as tl
+ 
+ from tensorfold.cuda.geometry import MLA_SELECT_ROWS as SELECT_ROWS   # a prompt chunk's rows scored at once
  
 +from . import kv8
 +from .kv8 import row_scales
@@ -1133,7 +1133,7 @@ index 59c274b..bc5362a 100644
  POOL = 4
  TOPK_POOLS = 512
  BR = 16
-@@ -15,8 +18,8 @@ TOKENS = TOPK_POOLS * POOL + POOL - 1      # a sparse row's attended tokens: its
+@@ -17,8 +20,8 @@ TOKENS = TOPK_POOLS * POOL + POOL - 1      # a sparse row's attended tokens: its
  
  
  @triton.jit
@@ -1144,7 +1144,7 @@ index 59c274b..bc5362a 100644
  
      r = tl.program_id(0)
      P = tl.load(POS).to(tl.int64)
-@@ -26,13 +29,16 @@ def _index_write(KR, k_stride, GR, LNW, LNB, IK, IG, POS, eps, D: tl.constexpr):
+@@ -28,13 +31,16 @@ def _index_write(KR, k_stride, GR, LNW, LNB, IK, IG, POS, eps, D: tl.constexpr):
      xc = x - mean
      var = tl.sum(xc * xc, axis=0) / D
      y = xc / tl.sqrt(var + eps) * tl.load(LNW + d).to(tl.float32) + tl.load(LNB + d).to(tl.float32)
@@ -1165,7 +1165,7 @@ index 59c274b..bc5362a 100644
  
      i = tl.program_id(0)
      P = tl.load(POS).to(tl.int64)
-@@ -40,40 +46,55 @@ def _pool_keys(IK, IG, APE, PK, POS, R, D: tl.constexpr):
+@@ -42,40 +48,55 @@ def _pool_keys(IK, IG, APE, PK, POS, R, D: tl.constexpr):
      if 4 * p + 3 > P + R - 1:
          return
      d = tl.arange(0, D)
@@ -1236,7 +1236,7 @@ index 59c274b..bc5362a 100644
  
      rb = tl.program_id(0)
      pb = tl.program_id(1)
-@@ -82,8 +103,10 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
+@@ -92,8 +113,10 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
      d = tl.arange(0, D)
      hh = tl.arange(0, HP)
      hok = hh < H
@@ -1249,7 +1249,7 @@ index 59c274b..bc5362a 100644
      for i in tl.static_range(RB):
          r = rb * RB + i
          if r < R:
-@@ -91,6 +114,8 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
+@@ -101,6 +124,8 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
              q = tl.load(QI + (r * H + hh[:, None]) * D + d[None, :], mask=hok[:, None], other=0.0).to(tl.bfloat16)
              kr = tl.where((p < npool)[:, None], k, 0.0)
              dots = tl.dot(q, tl.trans(kr))                                                # [HP, BP] fp32
@@ -1258,7 +1258,7 @@ index 59c274b..bc5362a 100644
              w = tl.load(W + r * w_stride + hh, mask=hok, other=0.0).to(tl.float32) * wscale
              sc = tl.sum(w[:, None] * tl.maximum(dots * scale, 0.0), axis=0)
              sc = tl.where(p < npool, sc, float("-inf"))
-@@ -98,12 +123,14 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
+@@ -108,12 +133,14 @@ def _scores(QI, W, w_stride, PK, OUT, POS, R, NP, scale, wscale, H: tl.constexpr
  
  
  @triton.jit
@@ -1276,7 +1276,7 @@ index 59c274b..bc5362a 100644
  
      r = tl.program_id(0)
      g = tl.program_id(1)
-@@ -111,11 +138,11 @@ def _scores_rows(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, BASE, R, NP, scal
+@@ -121,11 +148,11 @@ def _scores_rows(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, BASE, R, NP, scal
          if tl.load(SPR + r) == 0:
              return
          npool = (tl.load(POS + r) + 1) // 4
@@ -1290,7 +1290,7 @@ index 59c274b..bc5362a 100644
          nb = (NP + BP - 1) // BP
      if g >= nb:
          return
-@@ -126,9 +153,12 @@ def _scores_rows(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, BASE, R, NP, scal
+@@ -136,9 +163,12 @@ def _scores_rows(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, BASE, R, NP, scal
      w = tl.load(W + r * w_stride + hh, mask=hok, other=0.0).to(tl.float32) * wscale
      for pb in tl.range(g, nb, G, num_stages=1):          # Triton's pipelining of this loop: slower (measured)
          p = pb * BP + tl.arange(0, BP)
@@ -1304,7 +1304,7 @@ index 59c274b..bc5362a 100644
          sc = tl.sum(w[:, None] * tl.maximum(dots * scale, 0.0), axis=0)
          if SEG:
              tl.store(OUT + r * o_stride + p, sc, mask=p < npool)
-@@ -276,9 +306,10 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
+@@ -288,9 +318,10 @@ def select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: in
      D = qi.shape[1] // H
      wscale = 1.0 / 5.656854249492381 if H == 32 else H ** -0.5            # 32 ** -0.5 exactly as before
      grid = min(ROW_SCORE_G, triton.cdiv(np_max, 64))
@@ -1315,10 +1315,10 @@ index 59c274b..bc5362a 100644
 +    _scores_rows[(R, grid)](qi, wts, wts.stride(0), pkv, pks, scores, np_max, pos_dev, pos_dev, pos_dev, R, np_max,
 +                            D ** -0.5, wscale, H=H, HP=max(16, triton.next_power_of_2(H)), D=D, BP=64, G=grid,
 +                            SEG=False, RS=rs, FP8=fp8, num_warps=4)
-     pools = top_pools(scores, TOPK_POOLS)                                               # ascending pool index
+     pools = top_pools(scores, TOPK_POOLS, pos_dev)                                      # ascending pool index
      dev = qi.device
      width = TOPK_POOLS * POOL + POOL - 1
-@@ -320,14 +351,15 @@ def _select_prompt(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: i
+@@ -332,14 +363,15 @@ def _select_prompt(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, pos: i
      width = TOPK_POOLS * POOL + POOL - 1
      tokens = torch.empty((R, width), dtype=torch.int32, device=dev)
      counts = torch.empty((R,), dtype=torch.int32, device=dev)
@@ -1337,7 +1337,7 @@ index 59c274b..bc5362a 100644
          pools = top_pools(scores, TOPK_POOLS)                                           # ascending pool index
          _tokens[(n,)](pools, at, tokens[a:a + n], counts[a:a + n], W=width, K=TOPK_POOLS, PL=POOL, BLOCK=1024,
                        num_warps=4)
-@@ -426,10 +458,12 @@ def sparse_attention(q: torch.Tensor, kc: torch.Tensor, vc: torch.Tensor, tokens
+@@ -438,10 +470,12 @@ def sparse_attention(q: torch.Tensor, kc: torch.Tensor, vc: torch.Tensor, tokens
  
  
  # ------------------------------------------------------------------------------------- multi-stream windows ---
@@ -1354,7 +1354,7 @@ index 59c274b..bc5362a 100644
  
  @triton.jit
  def _ix_put(IX, row, d, x, D: tl.constexpr):
-@@ -444,23 +478,27 @@ def _ix_get(IX, row, d, D: tl.constexpr):
+@@ -456,23 +490,27 @@ def _ix_get(IX, row, d, D: tl.constexpr):
  
  
  @triton.jit
@@ -1391,7 +1391,7 @@ index 59c274b..bc5362a 100644
      d = tl.arange(0, D)
      x = tl.load(KR + r * k_stride + d).to(tl.float32)
      mean = tl.sum(x, axis=0) / D
-@@ -472,53 +510,62 @@ def _seg_index_write(KR, k_stride, GR, LNW, LNB, IK, IG, POS, BASE, eps, D: tl.c
+@@ -484,53 +522,62 @@ def _seg_index_write(KR, k_stride, GR, LNW, LNB, IK, IG, POS, BASE, eps, D: tl.c
  
  
  @triton.jit
@@ -1474,7 +1474,7 @@ index 59c274b..bc5362a 100644
      """Program (segment, g): pool blocks g, g + G, .. below the segment's pool count (on the device: the pools its
      last row sees), each block's keys (at the stream's pooled base) loaded once for all the segment's sparse rows;
      a row's scores are _scores' (its keys masked to its own pools before the dot, as with RB > 1), written for its
-@@ -535,7 +582,7 @@ def _seg_scores(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, SEG_START, SEG_ROW
+@@ -547,7 +594,7 @@ def _seg_scores(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, SEG_START, SEG_ROW
      hok = hh < H
      for pb in range(g, (npm + BP - 1) // BP, G):
          p = pb * BP + tl.arange(0, BP)
@@ -1483,7 +1483,7 @@ index 59c274b..bc5362a 100644
          for i in range(nr):
              r = r0 + i
              if tl.load(SPR + r) != 0:
-@@ -543,6 +590,8 @@ def _seg_scores(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, SEG_START, SEG_ROW
+@@ -555,6 +602,8 @@ def _seg_scores(QI, W, w_stride, PK, OUT, o_stride, POS, SPR, SEG_START, SEG_ROW
                  q = tl.load(QI + (r * H + hh[:, None]) * D + d[None, :], mask=hok[:, None], other=0.0).to(tl.bfloat16)
                  kr = tl.where((p < npool)[:, None], k, 0.0)
                  dots = tl.dot(q, tl.trans(kr))                                            # [HP, BP] fp32
@@ -1492,7 +1492,7 @@ index 59c274b..bc5362a 100644
                  w = tl.load(W + r * w_stride + hh, mask=hok, other=0.0).to(tl.float32) * wscale
                  sc = tl.sum(w[:, None] * tl.maximum(dots * scale, 0.0), axis=0)
                  tl.store(OUT + r * o_stride + p, sc, mask=p < npool)
-@@ -628,10 +677,11 @@ def seg_select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, row
+@@ -640,10 +689,11 @@ def seg_select_tokens(qi: torch.Tensor, wts: torch.Tensor, pk: torch.Tensor, row
      wscale = 1.0 / 5.656854249492381 if H == 32 else H ** -0.5            # select_tokens' constants
      scores = scratch.scores
      grid = min(SEG_SCORE_GRID, triton.cdiv(scores.shape[1], 64))

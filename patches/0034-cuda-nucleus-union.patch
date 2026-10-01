@@ -1,5 +1,5 @@
 diff --git tensorfold/cuda/sampling.py tensorfold/cuda/sampling.py
-index fd435f8..5bc101e 100644
+index bf058e8..3def71f 100644
 --- tensorfold/cuda/sampling.py
 +++ tensorfold/cuda/sampling.py
 @@ -5,6 +5,7 @@ from __future__ import annotations
@@ -10,7 +10,7 @@ index fd435f8..5bc101e 100644
  
  import numpy as np
  import torch
-@@ -123,6 +124,8 @@ def nucleus_rows(logits: torch.Tensor, positions: Sequence[int], sampling: Sampl
+@@ -119,6 +120,8 @@ def nucleus_rows(logits: torch.Tensor, positions: Sequence[int], sampling: Sampl
      mass = torch.floor(torch.exp(scaled - top[:, None]) * MASS).to(torch.int64)
      got = _shares(gather, scaled, mass, NUCLEUS, offset, id_map)
      drawn = _draw(got, positions, sampling)
@@ -19,7 +19,7 @@ index fd435f8..5bc101e 100644
      if drawn is None:                           # some row's nucleus runs past the candidates: every whole shard
          drawn = _draw(_shares(gather, scaled, mass, int(got[4].max()), offset, id_map), positions, sampling)
      if probs is not None:
-@@ -150,17 +153,52 @@ def _shares(gather, scaled, mass, count, offset, id_map):
+@@ -145,17 +148,52 @@ def _shares(gather, scaled, mass, count, offset, id_map):
              both[:, :, 2 * count:3 * count], both[:, :, 3 * count], both[:, :, 3 * count + 1])
  
  

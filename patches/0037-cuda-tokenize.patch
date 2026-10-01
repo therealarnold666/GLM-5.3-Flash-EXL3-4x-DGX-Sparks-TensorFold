@@ -1,5 +1,5 @@
 diff --git tensorfold/cuda/http.py tensorfold/cuda/http.py
-index c3d7cca..da26749 100644
+index b800c81..84ae839 100644
 --- tensorfold/cuda/http.py
 +++ tensorfold/cuda/http.py
 @@ -18,6 +18,9 @@ if TYPE_CHECKING:
@@ -12,7 +12,7 @@ index c3d7cca..da26749 100644
  def usage_of(result: dict[str, Any]) -> dict[str, Any]:
      """A reply's usage as the Mac server reports it, the prompt tokens found cached included."""
  
-@@ -81,7 +84,8 @@ def make_handler(app: App):
+@@ -85,7 +88,8 @@ def make_handler(app: App):
              if responses.route(self.path) == "":         # a Response: this handler's chat completion, translated
                  return responses.post(self, app)
              chat = self.path.rstrip("/").endswith("/chat/completions")
@@ -22,7 +22,7 @@ index c3d7cca..da26749 100644
                  return self._json(404, {"error": "not found"})
              try:
                  length = int(self.headers.get("Content-Length", 0))
-@@ -92,6 +96,16 @@ def make_handler(app: App):
+@@ -96,6 +100,16 @@ def make_handler(app: App):
                  body = json.loads(self.rfile.read(length) or b"{}")
              except (json.JSONDecodeError, UnicodeDecodeError):
                  return self._json(400, {"error": {"message": "the request body is not JSON", "type": "invalid_request_error"}})
@@ -40,10 +40,10 @@ index c3d7cca..da26749 100644
                  prepared = app.prepare(body, chat)
              except RequestError as exc:
 diff --git tensorfold/cuda/server.py tensorfold/cuda/server.py
-index 4ab6484..bbcf1a1 100644
+index 8a3ab2b..673fc9f 100644
 --- tensorfold/cuda/server.py
 +++ tensorfold/cuda/server.py
-@@ -190,17 +190,66 @@ class App:
+@@ -223,17 +223,66 @@ class App:
                                         self.sampling_for(body, rendered.tokens), ignore_eos=ignore_eos, stop=stop,
                                         vision=rendered.vision, grammar=compiled, think_budget=budget)
              text = render(body["messages"])
@@ -112,7 +112,7 @@ index 4ab6484..bbcf1a1 100644
      def check(self, body: dict[str, Any], *, prepared: PreparedRequest | None = None) -> str | None:
          """Why the request cannot run, or None; rendered before a stream's headers are sent."""
  
-@@ -489,6 +538,13 @@ class App:
+@@ -555,6 +604,13 @@ class App:
                                       encode=lambda t: list(self.tok.encode(t, add_special_tokens=False).ids))
  
  

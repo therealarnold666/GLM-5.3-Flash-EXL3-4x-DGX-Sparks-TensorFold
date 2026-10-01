@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index d2e45c5..1a8894f 100644
+index f09d0dd..cb39952 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -428,6 +428,48 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+@@ -429,6 +429,48 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
      return out_proj(w, b, o, a.o, qmm.group_sums(o, b.xs_ao[:R]), R)
  
  
@@ -276,10 +276,10 @@ index 0000000..91b3d06
 +        self.counts = torch.zeros((rows,), dtype=torch.int32, device=device)
 +        self.split = split_scratch(rows, pools, device)
 diff --git tensorfold/families/glm5_next/cuda/sparse.py tensorfold/families/glm5_next/cuda/sparse.py
-index 616632a..dcd849f 100644
+index 73cc902..6cfe91d 100644
 --- tensorfold/families/glm5_next/cuda/sparse.py
 +++ tensorfold/families/glm5_next/cuda/sparse.py
-@@ -11,6 +11,7 @@ TOPK_POOLS = 512
+@@ -13,6 +13,7 @@ TOPK_POOLS = 512
  BR = 16
  # the first position whose row select_tokens counts (npool > TOPK_POOLS): rows before it keep dense attention
  SPARSE_FROM = (TOPK_POOLS + 1) * POOL - 1
@@ -287,13 +287,14 @@ index 616632a..dcd849f 100644
  
  
  @triton.jit
-@@ -152,12 +153,17 @@ def _select_rows(S, OUT, NP, K: tl.constexpr, BLOCK: tl.constexpr):
+@@ -163,13 +164,19 @@ def _select_rows(S, OUT, NP, POS, K: tl.constexpr, BLOCK: tl.constexpr, VISIBLE:
  
  
- def top_pools(scores: torch.Tensor, k: int) -> torch.Tensor:
+ def top_pools(scores: torch.Tensor, k: int, pos_dev: torch.Tensor | None = None) -> torch.Tensor:
 -    """``_top_pools``'s pools in one kernel, ascending, without int64 keys, top-k or sort."""
 +    """``_top_pools``'s pools, ascending, without int64 keys, top-k or sort: one program a row, or for a decode
-+    window's long rows the split selection (select_split); the same pools either way."""
++    window's long rows the split selection (select_split); the same pools either way. ``pos_dev``: the rows sit at
++    pos_dev, pos_dev + 1, .. and the one-program selection reads each row's visible pools only (the same pools)."""
      R, NP = scores.shape
      if NP < k or not scores.is_contiguous():
          return _top_pools(scores, k)
@@ -302,12 +303,13 @@ index 616632a..dcd849f 100644
 +    # one program a row (speed only): decode rows past 1,024 scores 4,096 a step, prompt chunks' rows 1,024
 +    block, warps = (4096, 8) if R < SPLIT_ROWS and NP > 1024 else (1024, 4)
      out = torch.empty((R, k), dtype=torch.int64, device=scores.device)
--    _select_rows[(R,)](scores, out, NP, K=k, BLOCK=1024, num_warps=4)
-+    _select_rows[(R,)](scores, out, NP, K=k, BLOCK=block, num_warps=warps)
+     _select_rows[(R,)](scores, out, NP, pos_dev if pos_dev is not None else scores,
+-                       K=k, BLOCK=1024, VISIBLE=pos_dev is not None, num_warps=4)
++                       K=k, BLOCK=block, VISIBLE=pos_dev is not None, num_warps=warps)
      return out
  
  
-@@ -370,3 +376,357 @@ def sparse_attention(q: torch.Tensor, kc: torch.Tensor, vc: torch.Tensor, tokens
+@@ -390,3 +397,357 @@ def sparse_attention(q: torch.Tensor, kc: torch.Tensor, vc: torch.Tensor, tokens
          _sparse_chunks[(n, H, nch)](q[rows], kc, vc, tokens[rows], counts[rows], po, pm, pl, W=W, H=H, D=D, CH=CH,
                                      SCALE=scale, num_warps=4, num_stages=1)
          _sparse_merge[(n, H)](po, pm, pl, out[rows], counts[rows], H=H, D=D, NCH=nch, CH=CH, num_warps=4)

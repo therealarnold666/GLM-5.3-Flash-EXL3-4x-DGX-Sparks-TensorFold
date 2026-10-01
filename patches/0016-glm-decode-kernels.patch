@@ -1,9 +1,9 @@
 diff --git tensorfold/cuda/kernels/qmm.cpp tensorfold/cuda/kernels/qmm.cpp
-index c46571f..c94e59b 100644
+index 81c10c7..bb6a473 100644
 --- tensorfold/cuda/kernels/qmm.cpp
 +++ tensorfold/cuda/kernels/qmm.cpp
-@@ -3,6 +3,8 @@
- 
+@@ -4,6 +4,8 @@
+ bool qmm_clusters(int, bool);
  void qmm_cuda(const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&,
                at::Tensor&, const at::Tensor&, int, int, int, int, bool, bool);
 +void qmm_cfg_cuda(const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&,
@@ -11,7 +11,7 @@ index c46571f..c94e59b 100644
  void qmm_prefill_cuda(const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&, at::Tensor&, int,
                        int, bool, int);
  void qmm_prefill8w_cuda(const at::Tensor&, const at::Tensor&, const at::Tensor&, const at::Tensor&, at::Tensor&, int,
-@@ -43,6 +45,36 @@ void qmm(const at::Tensor& x, const at::Tensor& xs, const at::Tensor& w, const a
+@@ -44,6 +46,36 @@ void qmm(const at::Tensor& x, const at::Tensor& xs, const at::Tensor& w, const a
               static_cast<int>(bm), f32, reduce);
  }
  
@@ -37,7 +37,7 @@ index c46571f..c94e59b 100644
 +                out.scalar_type() == (f32 ? at::kFloat : at::kBFloat16), "out: (M, n)");
 +    c10::cuda::CUDAGuard guard(x.device());
 +    at::Tensor p;
-+    if (sk > 8) {
++    if (sk > 1 && !qmm_clusters(static_cast<int>(sk), true)) {
 +        p = part.has_value() ? *part : at::empty({sk, m, n}, x.options().dtype(at::kFloat));
 +        TORCH_CHECK(p.is_contiguous() && p.scalar_type() == at::kFloat && p.numel() >= sk * m * n, "part");
 +    }
@@ -48,7 +48,7 @@ index c46571f..c94e59b 100644
  // Prefill: x (M, K) bf16 times a packed 4-bit weight with each weight rounded once to bf16, one fp32 chain over K.
  void qmm_prefill(const at::Tensor& x, const at::Tensor& w, const at::Tensor& scales, const at::Tensor& biases,
                   at::Tensor& out, int64_t n, int64_t gs, bool f32, int64_t tile) {
-@@ -114,6 +146,7 @@ void qmm_prefill8w(const at::Tensor& x8, const at::Tensor& a, const at::Tensor&
+@@ -115,6 +147,7 @@ void qmm_prefill8w(const at::Tensor& x8, const at::Tensor& a, const at::Tensor&
  
  PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
      m.def("qmm", &qmm);
@@ -57,10 +57,10 @@ index c46571f..c94e59b 100644
      m.def("qmm_prefill8", &qmm_prefill8);
      m.def("qmm_prefill8w", &qmm_prefill8w);
 diff --git tensorfold/cuda/kernels/qmm.cu tensorfold/cuda/kernels/qmm.cu
-index a763387..2828909 100644
+index e8afd09..c759255 100644
 --- tensorfold/cuda/kernels/qmm.cu
 +++ tensorfold/cuda/kernels/qmm.cu
-@@ -288,8 +288,51 @@ void dispatch(int bm, const at::Tensor& x, const at::Tensor& xs, const at::Tenso
+@@ -292,6 +292,28 @@ void dispatch(int bm, const at::Tensor& x, const at::Tensor& xs, const at::Tenso
      }
  }
  
@@ -88,12 +88,17 @@ index a763387..2828909 100644
 +
  } // namespace
  
+ // Clusters hold up to 8 K slices (the portable size) from sm_90; more, unreduced slices or older GPUs use the buffer.
+@@ -299,6 +321,27 @@ bool qmm_clusters(int SK, bool reduce) {
+     return SK > 1 && SK <= 8 && reduce && at::cuda::getCurrentDeviceProperties()->major >= 9;
+ }
+ 
 +// ``qmm_cuda`` for decode rows (M <= 16, groups of 64, K slices reduced) on tile config ``cfg``.
 +void qmm_cfg_cuda(const at::Tensor& x, const at::Tensor& xs, const at::Tensor& w, const at::Tensor& scales,
 +                  const at::Tensor& biases, at::Tensor& out, const at::Tensor& part, int N, int SK, bool f32, int cfg) {
 +    const int M = x.size(0);
 +    TORCH_CHECK(M <= 16, "qmm_cfg: decode rows (up to 16)");
-+    const bool cluster = SK > 1 && SK <= 8;
++    const bool cluster = qmm_clusters(SK, true);
 +    if (f32) { if (cluster) dispatch_cfg<true, true>(cfg, x, xs, w, scales, biases, out, part, N, SK);
 +               else dispatch_cfg<true, false>(cfg, x, xs, w, scales, biases, out, part, N, SK); }
 +    else { if (cluster) dispatch_cfg<false, true>(cfg, x, xs, w, scales, biases, out, part, N, SK);
@@ -113,7 +118,7 @@ index a763387..2828909 100644
                const at::Tensor& biases, at::Tensor& out, const at::Tensor& part, int N, int SK, int gs, int bm,
                bool f32, bool reduce) {
 diff --git tensorfold/cuda/kernels/qmm.py tensorfold/cuda/kernels/qmm.py
-index 8792eb5..da21210 100644
+index 2c8fc13..83e6366 100644
 --- tensorfold/cuda/kernels/qmm.py
 +++ tensorfold/cuda/kernels/qmm.py
 @@ -16,7 +16,7 @@ def _ext():
@@ -149,7 +154,7 @@ index 8792eb5..da21210 100644
      return out if sk == 1 or reduce else part.reshape(-1)[:sk * m * q.n].view(sk, m, q.n)
  
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 64f5be7..2debdad 100644
+index 79a6427..116000f 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -96,6 +96,10 @@ class Engine:
@@ -564,7 +569,7 @@ index 9975ab1..bd3a28e 100644
            conv_w: torch.Tensor, state_in: torch.Tensor, a_log: torch.Tensor, dt_bias: torch.Tensor,
            norm_w: torch.Tensor, eps: float, lower: float, rows: int, scratch: KDAScratch,
 diff --git tensorfold/families/glm5_next/cuda/qmm.py tensorfold/families/glm5_next/cuda/qmm.py
-index f5225c6..7330c93 100644
+index e0b06a3..a3668ae 100644
 --- tensorfold/families/glm5_next/cuda/qmm.py
 +++ tensorfold/families/glm5_next/cuda/qmm.py
 @@ -343,7 +343,29 @@ def matmul(x: torch.Tensor, q: Q4 | B16, xs: torch.Tensor | None = None, *, out:

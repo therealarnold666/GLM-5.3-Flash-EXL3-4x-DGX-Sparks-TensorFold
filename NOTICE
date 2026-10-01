@@ -9,11 +9,16 @@ This project builds on third-party work that keeps its own license:
 
 TensorFold
   https://github.com/ashhart/TensorFold
-  Copyright (c) 2026 TensorFold contributors. MIT License.
-  The files in patches/ modify TensorFold v0.5.0 source; scripts/prepare.sh applies them to TensorFold's installed
+  Copyright 2026 TensorFold contributors. Apache License, Version 2.0 from 0.6.0; code written before 0.6.0 keeps its
+  MIT notice (below). TensorFold's NOTICE reads: "TensorFold / Copyright 2026 TensorFold contributors /
+  https://github.com/ashhart/TensorFold".
+  The files in patches/ modify TensorFold v0.6.0 source; scripts/prepare.sh applies them to TensorFold's installed
   package when it builds the image. The changes in patches/ are this project's work under Apache-2.0 (except the
-  parts credited below); the TensorFold code they modify, and quote as diff context, stays under TensorFold's MIT
-  License, so keep TensorFold's copyright and permission notice with any copy of a patched tree:
+  parts credited below); the TensorFold code they modify, and quote as diff context, stays under TensorFold's
+  licenses: Apache-2.0, and for code written before 0.6.0 also its MIT notice (TensorFold's LICENSES/MIT.txt), so keep
+  TensorFold's NOTICE and this copyright and permission notice with any copy of a patched tree:
+
+    Copyright (c) 2026 TensorFold contributors
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
@@ -33,14 +38,11 @@ TensorFold
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-  From 0.6.0 TensorFold is licensed under the Apache License, Version 2.0 (code written before 0.6.0 keeps its MIT
-  notice). Its NOTICE reads: "TensorFold / Copyright 2026 TensorFold contributors / https://github.com/ashhart/TensorFold".
-  patches/0047-cuda-context-errors.patch and patches/0048-cuda-metrics.patch port code from TensorFold v0.6.0 under
-  Apache-2.0: commit 68c6e35 (tensorfold/server/errors.py ContextLengthError, CONTEXT_LIMIT, refusal, error_body; the
-  context messages in tensorfold/cuda/server.py) and commit 4447ac3 (tensorfold/server/metrics.py, the request clocks in
-  tensorfold/cuda/health.py, Turns.parked in tensorfold/cuda/turns.py, the /metrics route in tensorfold/cuda/http.py).
-  Changed here: the Mac server's hooks left out, an OpenAI "param" field added, and GLM-specific refusals and
-  /health-derived metrics added. Ported code carries a comment naming its upstream commit.
+  patches/0044-cuda-context-errors.patch and patches/0045-cuda-metrics.patch extend code TensorFold v0.6.0 has
+  itself: 0044 gives context-window errors OpenAI's "param" field and the same wording and code
+  (context_length_exceeded) for GLM's own window check and image prompts; 0045 adds the CUDA server's /health
+  figures to /metrics as tensorfold_health:* families. Two comments in 0044 still name the upstream commit (68c6e35)
+  whose wording they reuse.
 
 b12x
   https://github.com/local-inference-lab/b12x
@@ -54,7 +56,7 @@ glm53-tensorfold-spark
   https://github.com/jayleaton/glm53-tensorfold-spark
   Copyright 2026 Jay Leaton (https://x.com/jayleaton)
   Apache License, Version 2.0.
-  patches/0039-glm-tool-calls.patch adapts parts of that project's patch 0620:
+  patches/0036-glm-tool-calls.patch adapts parts of that project's patch 0620:
     - tensorfold/cuda/reply_text.py: the rule that tool calls written inside the think block are the reply's calls
       when they end it (its trailing_calls), applied in ThinkSplit.
     - tensorfold/families/glm5_next/cuda/kept_reasoning.py: its reasoning store (the ReasoningMemory LRU, keyed by the
@@ -63,11 +65,12 @@ glm53-tensorfold-spark
       was written for.
     - tensorfold/tool_parameters.py: const schemas, and null read as None for a nullable string (its typed_value),
       moved into the shared decoder that every parser and both streamers use. Its coercions that change what a
-      resent history renders (quoted scalars, Python literals, integral floats) were not taken.
-  The rest of patch 0039 is this project's own implementation.
+      resent history renders (quoted scalars, Python literals, integral floats) were not taken. (TensorFold v0.6.0's
+      own decoder reads Python literals for Qwen's parsers; GLM's parsers keep values as written.)
+  The rest of patch 0036 is this project's own implementation.
   Decode code adapted from that project's patches (Apache-2.0, Copyright 2026 Jay Leaton), in
-  patches/0049-glm-l2-prefetch.patch and patches/0050-glm-exl3-decode-loads.patch:
-    - patches/0049-glm-l2-prefetch.patch: tensorfold/families/glm5_next/cuda/l2pf.cu, l2pf.cpp, l2pf.py
+  patches/0046-glm-l2-prefetch.patch and patches/0047-glm-exl3-decode-loads.patch:
+    - patches/0046-glm-l2-prefetch.patch: tensorfold/families/glm5_next/cuda/l2pf.cu, l2pf.cpp, l2pf.py
       (TF_GLM_L2PF): adapted from patch 0460's L2 prefetch (its l2pf.cu / l2pf.py; not its RoCE changes): a
       side-stream kernel that issues cp.async.bulk.prefetch.L2 (or line prefetches, or loads) for the weights the next
       kernels read, forked at a layer's attention and FFN all-gathers and after its attention projections and joined
@@ -78,7 +81,7 @@ glm53-tensorfold-spark
       DSA's output site placed after the query absorb, prefetching kv_b's value half (this project's latent layout)
       before the output projection; the next layer's small KDA / DSA / indexer weights added to the FFN site; no
       expert or MTP sites; 8 MiB a site by default.
-    - patches/0050-glm-exl3-decode-loads.patch: tensorfold/families/glm5_next/cuda/exl3.cu (dec_kernel's second load
+    - patches/0047-glm-exl3-decode-loads.patch: tensorfold/families/glm5_next/cuda/exl3.cu (dec_kernel's second load
       path, TF_GLM_EXL3_LOADS=nc), with its setting in exl3.cpp and exl3_mm.py: adapted from patch 0580 (its
       exl3_ld.cu ld_kernel, LD_NC): 16-byte ld.global.nc.L1::no_allocate loads of the trellis a k step ahead through a
       staging area in the warp's slice of the reduction buffer, and the item read with its count in one round trip,

@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index dfd613b..c4c8ab3 100644
+index 98ed9e6..c1fb8ce 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -283,7 +283,7 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int) -> torch
+@@ -285,7 +285,7 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int) -> torch
      with prof.timed("kda: recurrence"):
          out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log,
                              k.dt_bias, k.norm, c.eps, c.lower, R, b.kscratch if pre else st.scratch[li],

@@ -206,4 +206,4 @@ done
 
 prepared_state > "$PREPARED_MARKER"
 log "Done: both Sparks are ready. Start the server with ./start.sh (port $PORT)."
-log "The first start compiles CUDA kernels for GB10 (a few minutes); they are cached in $KERNEL_CACHE here and in ~/.cache/tensorfold-glm53 on the worker."
+log "The first start compiles CUDA kernels for GB10 (a few minutes); they are cached in $KERNEL_CACHE/<image hash> here and under ~/.cache/tensorfold-glm53 on the worker (a folder per image)."

@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 04ca1b1..7957ac7 100644
+index 032b546..f021d02 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -681,7 +681,8 @@ class GlmEngine:
+@@ -678,7 +678,8 @@ class GlmEngine:
                  print(f"[tensorfold] --parallel {parallel}: up to {parallel} requests decode together, their caches "
                        f"in one pool of {pool_rows} tokens (each up to {self.limit}); DFlash2 drafts, prompt chunks of "
                        f"{self.multi.fill_rows} rows while others decode (TF_GLM_FILL_ROWS, TF_GLM_FILL_SHARE "
@@ -13,10 +13,10 @@ index 04ca1b1..7957ac7 100644
                      print("[tensorfold] --parallel batched window ms by rows: " +
                            " ".join(f"{i + 1}:{ms:.1f}" for i, ms in enumerate(self.multi.row_ms)), flush=True)
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index 50cd873..c363bc4 100644
+index 60250c3..c32686e 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -482,18 +482,47 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, done: tu
+@@ -483,18 +483,47 @@ def kda_block(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, done: tu
              mm(b, fa, k.fb, qmm.group_sums(fa, b.xs_fa[:R]), b.ka[:R])
              mm(b, ga, k.gb, qmm.group_sums(ga, b.xs_ga[:R]), b.kg[:R])
              l2pf.site(layer.index, "o")
@@ -71,7 +71,7 @@ index 50cd873..c363bc4 100644
  def kda_segments(layer: LayerW, w: Weights, b: Buffers, R: int, seg: torch.Tensor, slots: "Slots",
                   proj: torch.Tensor, scratch, li: int) -> torch.Tensor:
      """kda_block's decode path for a multi-stream window (``seg``: kda.segment_table, set): the projections on every
-@@ -602,11 +631,24 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+@@ -603,11 +632,24 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
                  index, host_pos: int | None, sparse_np: int | None = None, layer: int = -1) -> torch.Tensor:
      """DSA on the latent cache: the same indexer and selection, attention over latents with kv_b's key blocks absorbed into the query."""
  
@@ -97,7 +97,7 @@ index 50cd873..c363bc4 100644
      # sparse_np: every row is past the dense limit (a captured graph); else the host position decides
      all_sparse = sparse_np is not None or (host_pos is not None and host_pos >= c.dense_limit)
      sparse_rows = index is not None and (all_sparse or (host_pos is not None and host_pos + R - 1 >= c.dense_limit))
-@@ -614,13 +656,13 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+@@ -615,13 +657,13 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
          ik, ig, pk = index
          ix = a.index
          with prof.timed("dsa: indexer update"):
@@ -116,7 +116,7 @@ index 50cd873..c363bc4 100644
      scale = c.qk_dim ** -0.5
      if not all_sparse:
          # Rows past the dense limit are recomputed sparsely below, so the dense pass needs only the chunks up to it
-@@ -631,8 +673,8 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+@@ -632,8 +674,8 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
                              hb=latent.head_block(R), starts=b.att_starts if b.prefill else None)
      if sparse_rows:
          with prof.timed("dsa: select tokens"):
@@ -127,7 +127,7 @@ index 50cd873..c363bc4 100644
                                                    pk.shape[0] - 2, pos_dev, bucket=sparse_np)
          with prof.timed("dsa: sparse attention"):
              if b.prefill and latent.SPARSE_ONEPASS:     # prompt rows: one pass a row, no partials (their own bits)
-@@ -640,8 +682,7 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
+@@ -641,8 +683,7 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
              else:
                  latent.sparse_attention(qa, lc, tokens, counts, ol, scale)
      with prof.timed("dsa: expand"):
@@ -137,7 +137,7 @@ index 50cd873..c363bc4 100644
  
  
  def dsa_segments(layer: LayerW, w: Weights, lc: torch.Tensor, b: Buffers, R: int, rows, sel=None, index=None, *,
-@@ -814,10 +855,13 @@ def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch:
+@@ -815,10 +856,13 @@ def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch:
      glue.hc_post(x, x, g, b.post[:R], b.comb[:R])
  
  
@@ -153,7 +153,7 @@ index 50cd873..c363bc4 100644
  
      c = w.cfg
      sp = b.split
-@@ -831,7 +875,10 @@ def split_layers(w: Weights, st: State, b: Buffers, R: int, nch: int | None, hos
+@@ -832,7 +876,10 @@ def split_layers(w: Weights, st: State, b: Buffers, R: int, nch: int | None, hos
                      b.comb[:Rp], b.hcpart[:Rp], c.eps, c.hc_eps, c.hc_iters, prompt=True)
          done = None                              # rows whose front the glue already ran (TF_GLM_PREFILL_OVERLAP=2)
          for i, layer in enumerate(layers):
@@ -165,7 +165,7 @@ index 50cd873..c363bc4 100644
              front = ffn_front(layer, w, b) if fronts else None
              with prof.timed("hc"):
                  sp.glue(layer.ffn_hc, layer.post_norm, front=front)
-@@ -894,8 +941,8 @@ def _compute(w: Weights, st: State, b: Buffers, R: int, *, logits: bool = True,
+@@ -895,8 +942,8 @@ def _compute(w: Weights, st: State, b: Buffers, R: int, *, logits: bool = True,
      if inject is not None:
          rows, features = inject
          b.x.index_copy_(0, rows, features.repeat(1, c.streams))

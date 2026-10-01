@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index 42f2929..ef785e7 100644
+index e156332..79a1ec9 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -376,18 +376,46 @@ def out_proj(w: Weights, b: Buffers, x: torch.Tensor, q: qmm.Q4, xs: torch.Tenso
+@@ -377,18 +377,46 @@ def out_proj(w: Weights, b: Buffers, x: torch.Tensor, q: qmm.Q4, xs: torch.Tenso
      return partials(w, b, R, fill)
  
  
@@ -55,7 +55,7 @@ index 42f2929..ef785e7 100644
      cur = st.cur[li]
      with prof.timed("kda: recurrence"):
          out = kda_mod.chain(p, k.b_off, b.ka[:R], b.kg[:R], st.conv[li], k.conv, st.rec[cur, li], k.a_log,
-@@ -424,18 +452,27 @@ def kda_segments(layer: LayerW, w: Weights, b: Buffers, R: int, seg: torch.Tenso
+@@ -425,18 +453,27 @@ def kda_segments(layer: LayerW, w: Weights, b: Buffers, R: int, seg: torch.Tenso
          return out_proj(w, b, out, k.o, qmm.group_sums(out, b.kxs[:R]), R)
  
  
@@ -89,7 +89,7 @@ index 42f2929..ef785e7 100644
      if a.absorb is not None:
          return _dsa_latent(a, w, kc, pos_dev, b, R, nch, index, host_pos, sparse_np)
      if sparse_np is not None:
-@@ -581,14 +618,32 @@ def dsa_segments(layer: LayerW, w: Weights, lc: torch.Tensor, b: Buffers, R: int
+@@ -582,14 +619,32 @@ def dsa_segments(layer: LayerW, w: Weights, lc: torch.Tensor, b: Buffers, R: int
      return out_proj(w, b, o, a.o, qmm.group_sums(o, b.xs_ao[:R]), R)
  
  
@@ -126,7 +126,7 @@ index 42f2929..ef785e7 100644
      c = w.cfg
      m = layer.moe
      with prof.timed("moe: route"):
-@@ -601,13 +656,11 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -602,13 +657,11 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
  
          with prof.timed("moe: routed (exl3)"):
              exl3_mm.routed(b.normed[:R], b.pick, b.plan, m.experts, b.exl3, b.ey.view(-1, c.hidden), R, c.limit)
@@ -143,7 +143,7 @@ index 42f2929..ef785e7 100644
              with prof.timed("moe: combine"):
                  # the shared row read from sy where it is (the copy's bits, one pass less); decode windows too unless
                  # TF_GLM_COMBINE_SY=0
-@@ -631,21 +684,40 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
+@@ -632,21 +685,40 @@ def moe_block(layer: LayerW, w: Weights, b: Buffers, R: int) -> torch.Tensor:
  
  
  def _mixer(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch: int | None, host_pos: int | None,
@@ -189,7 +189,7 @@ index 42f2929..ef785e7 100644
  
  
  def layer_forward(layer: LayerW, w: Weights, st: State, b: Buffers, R: int, nch: int | None = None,
-@@ -677,20 +749,25 @@ def split_layers(w: Weights, st: State, b: Buffers, R: int, nch: int | None, hos
+@@ -678,20 +750,25 @@ def split_layers(w: Weights, st: State, b: Buffers, R: int, nch: int | None, hos
      sp = b.split
      layers = w.layers
      sp.begin(R)

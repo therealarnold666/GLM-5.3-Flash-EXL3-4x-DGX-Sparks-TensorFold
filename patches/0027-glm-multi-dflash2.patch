@@ -1,5 +1,5 @@
 diff --git tensorfold/families/glm5_next/cuda/dflash2.py tensorfold/families/glm5_next/cuda/dflash2.py
-index 20ed740..a96d90f 100644
+index 25947bb..127ea01 100644
 --- tensorfold/families/glm5_next/cuda/dflash2.py
 +++ tensorfold/families/glm5_next/cuda/dflash2.py
 @@ -50,14 +50,19 @@ def best_depth(q, round_ms) -> int:
@@ -25,7 +25,7 @@ index 20ed740..a96d90f 100644
      grp = c // GS
      d0 = tl.load(DYN + ((row * 2 + BRANCH) * 2) * G + grp, mask=ok, other=0.0).to(tl.float32)
      d1 = tl.load(DYN + ((row * 2 + BRANCH) * 2 + 1) * G + grp, mask=ok, other=0.0).to(tl.float32)
-@@ -162,14 +167,14 @@ def _dattn_kernel(Q, K, V, OUT, POS, window, scale, N: tl.constexpr, G: tl.const
+@@ -157,14 +162,14 @@ def _dattn_kernel(Q, K, V, OUT, POS, window, scale, N: tl.constexpr, G: tl.const
  
  
  def _dconv(x: torch.Tensor, dyn: torch.Tensor, base: torch.Tensor, branch: int, group_size: int,
@@ -42,7 +42,7 @@ index 20ed740..a96d90f 100644
      return out
  
  
-@@ -184,6 +189,20 @@ def _mm(x: torch.Tensor, w: qmm.Q4, xs: torch.Tensor | None = None, *, f32: bool
+@@ -179,6 +184,20 @@ def _mm(x: torch.Tensor, w: qmm.Q4, xs: torch.Tensor | None = None, *, f32: bool
      return qmm.matmul(x, w, xs, f32=f32)
  
  
@@ -63,7 +63,7 @@ index 20ed740..a96d90f 100644
  @dataclass
  class DraftLayer:
      in_norm: torch.Tensor
-@@ -485,15 +504,7 @@ class Drafter:
+@@ -478,15 +497,7 @@ class Drafter:
              self.cand_host.copy_(self.cand)
          g = self.cand_host[:self.cand_n].view(self.gathered, self.block - 1, 2 * self.top_k)[:, :depth]
          proj = self.cand_host[self.cand_n:].view(self.block - 1, -1)[:depth]

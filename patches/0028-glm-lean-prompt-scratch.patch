@@ -1,37 +1,32 @@
 diff --git tensorfold/cuda/geometry.py tensorfold/cuda/geometry.py
-index dcf1610..49f10d0 100644
+index 7abbd21..0306412 100644
 --- tensorfold/cuda/geometry.py
 +++ tensorfold/cuda/geometry.py
-@@ -8,6 +8,7 @@ from .capacity import Geometry, itemsize
- PREFILL_ROWS = 2048     # a prompt chunk's rows: Flash Next and GLM keep buffers of this many rows
- PREFILL_ATT_ROWS = 256  # Flash Next's prompt attention block
- MLA_DECODE_ROWS = 64    # GLM's decode windows the MLA estimate sizes buffers for (its verify windows: at most this)
-+MLA_PROMPT_ATT_ROWS = 512   # GLM's prompt-chunk rows a dense latent attention call takes (forward.PROMPT_ATT_ROWS)
- 
- 
- def size(info: dict, name: str = "tensor") -> int:
-@@ -194,10 +195,26 @@ def _indexed_prefill_row(t: dict, world: int, h: int, hk: int, hd: int, nv: int,
+@@ -220,16 +220,26 @@ def _indexed_prefill_row(t: dict, world: int, h: int, hk: int, hd: int, nv: int,
              + 12 * streams + 64)
  
  
+-def exl3_expert_scratch(rows: int, slots: int, d: int, width: int) -> int:
+-    """GLM's ``exl3_mm.Scratch`` for ``rows`` x ``slots`` pairs: fp16 rotated inputs and the fp32 split-K sums."""
 +def exl3_expert_scratch(rows: int, slots: int, d: int, width: int, *, prompt: bool) -> int:
 +    """GLM's ``exl3_mm.Scratch`` for a window of ``rows`` rows: fp16 rotated inputs of gate/up (2 x pairs x d) and down
 +    (pairs x ``width``, a rank's expert width); a decode window's fp32 split-K sums (2 x 4 splits x pairs x
 +    max(width, d)) and block counters (16-pair items); a prompt window's (``prompt``: TF_GLM_EXL3_PROMPT) launch order."""
-+
-+    pairs = rows * slots
+ 
+     pairs = rows * slots
+-    return 2 * pairs * d * 2 + pairs * width * 2 + 2 * 4 * pairs * max(width, d) * 4
 +    total = 2 * pairs * d * 2 + pairs * width * 2
 +    if prompt:
 +        return total + 4 + 4 + (pairs // 16 + 1024) * 4
 +    return total + 2 * 4 * pairs * max(width, d) * 4 + (pairs + pairs // 16 + 1) * max(1, width // 128) * 4 + 4
-+
-+
+ 
+ 
  def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560, latent: bool = False,
 -                 prefill_rows: int = PREFILL_ROWS, mtp: bool | None = None) -> Geometry:
+-    """GLM's engine; ``mtp``: whether it holds the MTP head's caches and buffers (None: when the checkpoint has one)."""
 +                 prefill_rows: int = PREFILL_ROWS, mtp: bool | None = None, onepass: bool = False,
 +                 exl3_prompt: bool = True, prompt_split_k: bool = True) -> Geometry:
-     """GLM's engine: ``mtp`` whether it holds the MTP head's caches and decode buffers (None: when the checkpoint has
--    one; GLM's TF_GLM_MTP can leave it out)."""
++    """GLM's engine: ``mtp`` whether it holds the MTP head's caches and decode buffers (None: when the checkpoint has
 +    one; GLM's TF_GLM_MTP can leave it out); ``onepass``: prompt chunks' sparse latent attention keeps no partials
 +    (TF_GLM_SPARSE_ONEPASS); an EXL3 checkpoint's ``exl3_prompt``: prompt chunks run the prompt expert kernels
 +    (TF_GLM_EXL3_PROMPT: no split-K sums), ``prompt_split_k``: the prompt buffers keep split-K partials for BF16 / FP8
@@ -39,11 +34,13 @@ index dcf1610..49f10d0 100644
      linear, attention = layer_counts(t)
      lin = t.get("linear_attn_config") or {}
      heads = int(t["num_attention_heads"]) // world
-@@ -220,16 +237,22 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
+@@ -252,15 +262,18 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
      # prompt-chunk buffers: at most 5 row extents a row without the head
      fixed += prefill_rows * 5 * (extent - int(t["vocab_size"]) // world)
      if (t.get("_quantization") or {}).get("quant_method") == "exl3":
--        fixed += 128 * rows * slots * max(width, d) * 4
+-        # EXL3 experts' scratch (decode windows, the MTP head's, a prompt chunk) and the prompt's BF16 split-K partials
+-        fixed += (2 if mtp else 1) * exl3_expert_scratch(rows, slots, d, width)
+-        fixed += exl3_expert_scratch(prefill_rows, slots, d, width) + 8 * prefill_rows * 16384 * 4
 +        # the routed experts' scratch of the decode windows (the MTP head's too) and of a prompt chunk, and the prompt
 +        # buffers' split-K partials (8 x rows x 16,384 fp32, as forward.Buffers allocates them)
 +        fixed += (2 if mtp else 1) * exl3_expert_scratch(rows, slots, d, width, prompt=False)
@@ -55,18 +52,13 @@ index dcf1610..49f10d0 100644
 -        scratch = mla_chunk_scratch(t, world, capacity, latent=latent, prefill_rows=prefill_rows)
 +        scratch = mla_chunk_scratch(t, world, capacity, latent=latent, prefill_rows=prefill_rows, onepass=onepass)
          if latent:
--            # latent cache; one prompt chunk's latent partials and absorbed rows (the MTP absorbs through the same buffers)
+-            # latent cache; a prompt chunk's partials (MLA_PROMPT_ATT_ROWS rows at a time) and absorbed rows (MTP's too)
 +            # latent cache; a prompt chunk's latent partials (its dense pass runs MLA_PROMPT_ATT_ROWS rows at a time)
 +            # and absorbed rows (the MTP absorbs through the same buffers)
              cache = count * capacity * lw * 2
              dense = min(capacity, minimum_slots) + prefill_rows
--            scratch += ((dense + 511) // 512) * prefill_rows * heads * (lw + 2) * 4 + 4 * prefill_rows * heads * lw
-+            scratch += (((dense + 511) // 512) * min(prefill_rows, MLA_PROMPT_ATT_ROWS) * heads * (lw + 2) * 4
-+                        + 4 * prefill_rows * heads * lw)
-         else:
-             cache = count * capacity * heads * (kd + vd) * 2
-             scratch += (2 if mtp else 1) * ((capacity + rows + 511) // 512) * rows * heads * (kd + 2) * 4
-@@ -238,12 +261,16 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
+             scratch += (((dense + 511) // 512) * min(prefill_rows, MLA_PROMPT_ATT_ROWS) * heads * (lw + 2) * 4
+@@ -273,12 +286,16 @@ def mla_geometry(t: dict, world: int, reserve: int, *, minimum_slots: int = 2560
      return Geometry(bytes_at, reserve, minimum_slots)
  
  
@@ -78,18 +70,18 @@ index dcf1610..49f10d0 100644
 +    attention's partials, which the latent path's one-pass kernel (``onepass``) does not allocate."""
  
      heads, topk = int(t["num_attention_heads"]) // world, int(t.get("index_topk", 2048))
-     # the fp32 pool scores of at most 512 rows at once (glm5_next sparse.SELECT_ROWS), the token lists of the chunk's
-     select = min(prefill_rows, 512) * 4 * ((capacity + 3) // 4) + prefill_rows * 16 * (topk + 3)
+     # the fp32 pool scores of at most MLA_SELECT_ROWS rows at once, the chosen pools and token lists of the chunk's
+     select = min(prefill_rows, MLA_SELECT_ROWS) * 4 * ((capacity + 3) // 4) + prefill_rows * 16 * (topk + 3)
 +    if latent and onepass:
 +        return select
      if latent:
          return select + ((topk + 515) // 512) * prefill_rows * heads * (int(t.get("kv_lora_rank", 512)) + 2) * 4
      kd = int(t["qk_nope_head_dim"]) + int(t.get("qk_rope_head_dim", 0))
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 8fb8085..37051b4 100644
+index e37584a..1a65d1c 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -376,11 +376,15 @@ class GlmEngine:
+@@ -372,11 +372,15 @@ class GlmEngine:
              weights_estimate = lambda name, info: ((math.prod(info["shape"]) * 2, 0)
                                                     if name.startswith("model.visual.") else text_weights(name, info))
  
@@ -107,10 +99,10 @@ index 8fb8085..37051b4 100644
          self.capacity_plan = admit(model_dir, context if explicit else cfg.dense_limit, explicit, torch,
                                     geometry,
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index 5980279..d2e45c5 100644
+index a5bf941..f09d0dd 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -16,6 +16,21 @@ from .attention import AttnScratch, attention, kv_write
+@@ -17,6 +17,21 @@ from .attention import AttnScratch, attention, kv_write
  from .weights import LayerW, Weights
  
  
@@ -132,21 +124,21 @@ index 5980279..d2e45c5 100644
  class Buffers:
      """Scratch for windows of up to ``rows`` rows, sliced [:R] for smaller ones; ``prefill`` for prompt chunks."""
  
-@@ -35,8 +50,12 @@ class Buffers:
+@@ -36,9 +51,12 @@ class Buffers:
          if latent.ENABLED:
              # Dense attention only ever covers contexts up to the dense limit; longer rows go sparse.
              self.attn = None
+-            # a prompt chunk's dense pass runs PROMPT_ATT_ROWS rows at a time: its fp32 partials hold that many rows
 +            # a prompt chunk's dense pass runs PROMPT_ATT_ROWS rows at a time (``dense_attention``): its fp32
 +            # partials hold that many rows, not the chunk's
              self.lat_s = latent.LatentScratch(rows, HL, latent.chunks_for(min(capacity, 2560) + rows), dev,
--                                              lw=c.kv_lora)
-+                                              lw=c.kv_lora, part_rows=PROMPT_ATT_ROWS if prefill else rows)
+                                               lw=c.kv_lora, part_rows=PROMPT_ATT_ROWS if prefill else rows)
 +            self.att_starts = (torch.arange(0, rows, self.lat_s.part_rows, dtype=torch.int32, device=dev)
 +                               if prefill else None)
          else:
              self.attn = AttnScratch(1 if prefill else rows, HL, c.qk_dim, capacity, dev)
          if prefill:
-@@ -104,7 +123,10 @@ class Buffers:
+@@ -106,7 +124,10 @@ class Buffers:
          # rank partials
          self.part = torch.empty((rows, D), dtype=f32, device=dev)
          self.gath = torch.empty((w.world * rows * D,), dtype=f32, device=dev)
@@ -158,80 +150,58 @@ index 5980279..d2e45c5 100644
          # final
          self.hidden = torch.empty((rows, D), dtype=bf, device=dev)
          self.fnormed = torch.empty((rows, D), dtype=bf, device=dev)
-@@ -342,6 +364,25 @@ def dense_rows(c, R: int, host_pos: int | None) -> int:
+@@ -344,19 +365,22 @@ def dense_rows(c, R: int, host_pos: int | None) -> int:
      return min(R, max(0, sparse.SPARSE_FROM - host_pos))
  
  
+-def dense_attention(qa: torch.Tensor, lc: torch.Tensor, pos_dev: torch.Tensor, s: latent.LatentScratch, *,
+-                    scale: float, nch: int, out: torch.Tensor, hb: int | None = None) -> torch.Tensor:
+-    """``latent.attention`` in blocks of ``part_rows`` rows, each at its first row's position: one call's bits a row
+-    (``hb``: the window's ``head_block``, which a window's first rows computed alone keep)."""
 +def dense_attention(qa: torch.Tensor, lc: torch.Tensor, pos_dev: torch.Tensor, s, *, scale: float, nch: int,
 +                    out: torch.Tensor, hb: int, starts: torch.Tensor | None = None) -> torch.Tensor:
 +    """``latent.attention`` of qa's rows in blocks of the scratch's ``part_rows`` (block i's queries at device
 +    position pos_dev + starts[i], ``starts`` = arange(0, rows, part_rows)): every row gets the bits of one call over
 +    all of them, since a row's programs read only its query, keys up to its position and its own partials, and
 +    ``hb`` and ``nch`` stay the window's (``latent.attention``)."""
-+
-+    R, step = qa.shape[0], s.part_rows
-+    if R <= step:
-+        return latent.attention(qa, lc, pos_dev, s, scale=scale, nch=nch, out=out, hb=hb)
+ 
+     R, step = qa.shape[0], s.part_rows
+-    hb = latent.head_block(R) if hb is None else hb
+     if R <= step:
+         return latent.attention(qa, lc, pos_dev, s, scale=scale, nch=nch, out=out, hb=hb)
+-    for r0 in range(0, R, step):
 +    if starts is None or starts.numel() < -(-R // step):
 +        raise ValueError(f"dense attention of {R} rows in blocks of {step} needs the blocks' start offsets")
 +    at = pos_dev + starts                                  # each block's first row's position, on the device
 +    for i, r0 in enumerate(range(0, R, step)):
-+        r1 = min(R, r0 + step)
+         r1 = min(R, r0 + step)
+-        at = pos_dev if r0 == 0 else pos_dev + r0          # the block's first row's position, on the device
+-        latent.attention(qa[r0:r1], lc, at, s, scale=scale, nch=nch, out=out[r0:r1], hb=hb)
 +        latent.attention(qa[r0:r1], lc, at[i:i + 1], s, scale=scale, nch=nch, out=out[r0:r1], hb=hb)
-+    return out
-+
-+
- def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffers, R: int, nch: int | None,
-                 index, host_pos: int | None, sparse_np: int | None = None) -> torch.Tensor:
-     """DSA on the latent cache: the same indexer and selection, attention over latents with kv_b's key blocks absorbed into the query."""
-@@ -370,8 +411,8 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
-         # and only the rows before it (a row's dense bits do not depend on the rows after it: latent.attention).
+     return out
+ 
+ 
+@@ -389,7 +413,7 @@ def _dsa_latent(a, w: Weights, lc: torch.Tensor, pos_dev: torch.Tensor, b: Buffe
          dense = dense_rows(c, R, host_pos) if sparse_rows else R
          with prof.timed("dsa: dense attention"):
--            latent.attention(qa[:dense], lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol[:dense],
--                             hb=latent.head_block(R))
-+            dense_attention(qa[:dense], lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol[:dense],
+             dense_attention(qa[:dense], lc, pos_dev, s, scale=scale, nch=min(nch or s.nch, s.nch), out=ol[:dense],
+-                            hb=latent.head_block(R))
 +                            hb=latent.head_block(R), starts=b.att_starts if b.prefill else None)
      if sparse_rows:
          with prof.timed("dsa: select tokens"):
              mm(b, b.qr[:R], ix.qb, b.xs_qr[:R], b.qi[:R])
 diff --git tensorfold/families/glm5_next/cuda/latent.py tensorfold/families/glm5_next/cuda/latent.py
-index 50a7372..3026586 100644
+index cfe50b3..3026586 100644
 --- tensorfold/families/glm5_next/cuda/latent.py
 +++ tensorfold/families/glm5_next/cuda/latent.py
-@@ -594,13 +594,16 @@ def chunk_stages() -> int:
+@@ -594,7 +594,9 @@ def chunk_stages() -> int:
  
  
  class LatentScratch:
--    """Chunk partials for up to rows x heads x chunks, the absorbed queries and the attended latents."""
--
--    def __init__(self, rows: int, heads: int, chunks: int, device, lw: int = L) -> None:
--        self.rows, self.heads, self.nch, self.lw = rows, heads, chunks, lw
--        self.po = torch.empty((chunks * rows * heads * lw,), dtype=torch.float32, device=device)
--        self.pm = torch.empty((chunks * rows * heads,), dtype=torch.float32, device=device)
--        self.pl = torch.empty((chunks * rows * heads,), dtype=torch.float32, device=device)
+-    """Chunk partials for ``part_rows`` (one ``attention`` call) x heads x chunks; queries and latents for ``rows``."""
 +    """Chunk partials for up to part_rows x heads x chunks (``part_rows``: the rows one ``attention`` call takes,
 +    default ``rows``; a prompt chunk's dense pass runs in blocks of them), the absorbed queries and the attended
 +    latents of up to ``rows``."""
-+
-+    def __init__(self, rows: int, heads: int, chunks: int, device, lw: int = L, part_rows: int | None = None) -> None:
-+        part_rows = rows if part_rows is None else min(rows, part_rows)
-+        self.rows, self.part_rows, self.heads, self.nch, self.lw = rows, part_rows, heads, chunks, lw
-+        self.po = torch.empty((chunks * part_rows * heads * lw,), dtype=torch.float32, device=device)
-+        self.pm = torch.empty((chunks * part_rows * heads,), dtype=torch.float32, device=device)
-+        self.pl = torch.empty((chunks * part_rows * heads,), dtype=torch.float32, device=device)
-         self.qa = torch.empty((rows, heads, lw), dtype=torch.bfloat16, device=device)
-         self.ol = torch.empty((rows, heads, lw), dtype=torch.bfloat16, device=device)
-         self.dummy = torch.zeros((1,), dtype=torch.int32, device=device)
-@@ -613,9 +616,9 @@ def attention(qa: torch.Tensor, cache: torch.Tensor, pos: torch.Tensor, s: Laten
-     Row r's programs read only its query, keys 0 .. pos + r and its own partials, so the first rows of a window
-     computed alone (``qa[:n]``, the same nch and ``hb``: the window's ``head_block``) get the window's bits."""
-     R, H, LW = qa.shape
--    if nch > s.nch or R > s.rows or LW != s.lw:
-+    if nch > s.nch or R > s.part_rows or LW != s.lw:
-         raise ValueError(f"latent attention: {R} rows, {nch} chunks, width {LW} past the scratch's "
--                         f"{s.rows}, {s.nch}, {s.lw}")
-+                         f"{s.part_rows}, {s.nch}, {s.lw}")
-     n = nch * R * H
-     hb = head_block(R) if hb is None else hb
-     if hb not in (HB, HB_WIDE):
+ 
+     def __init__(self, rows: int, heads: int, chunks: int, device, lw: int = L, part_rows: int | None = None) -> None:
+         part_rows = rows if part_rows is None else min(rows, part_rows)

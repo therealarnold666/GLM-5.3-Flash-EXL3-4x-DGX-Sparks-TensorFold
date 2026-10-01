@@ -1,8 +1,8 @@
 diff --git tensorfold/families/glm5_next/cuda/dflash2.py tensorfold/families/glm5_next/cuda/dflash2.py
-index ebace1f..a6ee808 100644
+index 309104e..0ca8c5d 100644
 --- tensorfold/families/glm5_next/cuda/dflash2.py
 +++ tensorfold/families/glm5_next/cuda/dflash2.py
-@@ -136,9 +136,10 @@ def _dconv(x: torch.Tensor, dyn: torch.Tensor, base: torch.Tensor, branch: int,
+@@ -144,9 +144,10 @@ def _dconv(x: torch.Tensor, dyn: torch.Tensor, base: torch.Tensor, branch: int,
  
  
  def _quantize4(w: torch.Tensor) -> qmm.Q4:
@@ -984,10 +984,10 @@ index 0000000..64d4f54
 +if __name__ == "__main__":
 +    sys.exit(main())
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 4c06a8a..b27eb43 100644
+index 3c2b10e..613a0f7 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -221,9 +221,17 @@ class GlmEngine:
+@@ -252,10 +252,17 @@ class GlmEngine:
          self.limit = self.capacity_plan["context_window"]
          capacity = self.capacity_plan["cache_slots"]
          long_context = self.limit > cfg.dense_limit
@@ -1000,23 +1000,24 @@ index 4c06a8a..b27eb43 100644
 +        quant_code = DRAFT_QUANTS.index(draft_quant())
          # both ranks must run the same calls: refuse to start when they were given different settings
          mine = [int(drafter is not None), capacity, int(long_context), int(serial_only), int(LATENT),
--                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code()
+-                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code() + \
+-            [int(self.mtp_on), int(DRAFT_RING)]
 +                prefill_rows, self.grid] + (self.copy.code() if self.copy is not None else [0, 0]) + self.split.code() + [
-+                int(self.dump is not None), quant_code]
++                int(self.dump is not None), quant_code, int(self.mtp_on), int(DRAFT_RING)]
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
          wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -232,7 +240,8 @@ class GlmEngine:
+@@ -264,7 +271,8 @@ class GlmEngine:
          if both[0][:-1] != both[1][:-1]:
              raise RuntimeError("the two ranks were started with different settings (draft model, context, drafts, "
                                 "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_COPY_*, "
--                               "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES): "
+-                               "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
 +                               "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_DRAFT_DUMP, "
-+                               "TF_GLM_DRAFT_QUANT): "
++                               "TF_GLM_DRAFT_QUANT, TF_GLM_MTP, TF_GLM_DRAFT_RING): "
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
                                 "(or pass --drafter none to both) and give both the same flags")
          self.cache_bytes = min(both[0][-1], both[1][-1]) << 20
-@@ -262,6 +271,12 @@ class GlmEngine:
+@@ -299,6 +307,12 @@ class GlmEngine:
              self.e.pbuf.split.warm()                 # both ranks: open the send/receive connection now
              if rank == 0:
                  print(f"[tensorfold] {self.split.describe()}", flush=True)
@@ -1029,7 +1030,7 @@ index 4c06a8a..b27eb43 100644
          if rank == 0 and self.grid:
              print(f"[tensorfold] prompt chunks and kept prompt states on a {self.grid}-token grid "
                    f"(TF_GLM_PROMPT_GRID)", flush=True)
-@@ -536,6 +551,16 @@ class GlmEngine:
+@@ -601,6 +615,16 @@ class GlmEngine:
              copies = CopyDrafts(list(prompt) + [first], self.copy.match, self.copy.most)
          if policy is None:
              res = serial_decode(self.e, first, max_tokens, sampling, stop_eos=stop_eos, on_tokens=on_tokens)
@@ -1047,7 +1048,7 @@ index 4c06a8a..b27eb43 100644
              greedy = sampling is None or sampling.temperature <= 0
              m_policy = DepthPolicy(3, fixed=True, confidence=0.35) if greedy else DepthPolicy(3, low=0.6, high=0.85)
 diff --git tensorfold/families/glm5_next/cuda/qmm.py tensorfold/families/glm5_next/cuda/qmm.py
-index ee83025..6ed26f1 100644
+index 6377c42..3c40295 100644
 --- tensorfold/families/glm5_next/cuda/qmm.py
 +++ tensorfold/families/glm5_next/cuda/qmm.py
 @@ -211,6 +211,29 @@ def quantize4_mse(w: torch.Tensor, chunk: int = 4096, grid: int = 16) -> Q4:
@@ -1081,7 +1082,7 @@ index ee83025..6ed26f1 100644
      return quantize4_mse(weight.to(torch.bfloat16)) if weight.shape[1] % 64 == 0 else make_f8(weight)
  
 diff --git tensorfold/families/glm5_next/cuda/weights.py tensorfold/families/glm5_next/cuda/weights.py
-index 2d6ab83..8b8b10d 100644
+index 766a3b0..55bb452 100644
 --- tensorfold/families/glm5_next/cuda/weights.py
 +++ tensorfold/families/glm5_next/cuda/weights.py
 @@ -13,7 +13,8 @@ from tensorfold.cuda import experts as grouped
@@ -1094,7 +1095,7 @@ index 2d6ab83..8b8b10d 100644
  
  PREFIX = "model.language_model."
  
-@@ -425,7 +426,8 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda") -> Weights:
+@@ -430,7 +431,8 @@ def load(model_dir: str | Path, *, rank: int, device: str = "cuda", mtp: bool =
          if exl3:
              raw = rd.get("lm_head.weight")[rank * vl:(rank + 1) * vl].to(dev)
              head = dense(raw)

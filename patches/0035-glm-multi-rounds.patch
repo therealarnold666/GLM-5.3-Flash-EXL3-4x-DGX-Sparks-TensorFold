@@ -1,5 +1,5 @@
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index febb0eb..6732311 100644
+index eb427d0..ed74101 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
 @@ -160,7 +160,9 @@ class Engine:
@@ -23,10 +23,10 @@ index febb0eb..6732311 100644
          if g is not None:
              self.replays[kind] += 1
 diff --git tensorfold/families/glm5_next/cuda/dflash2.py tensorfold/families/glm5_next/cuda/dflash2.py
-index a96d90f..8b5ff07 100644
+index 127ea01..b5dcd26 100644
 --- tensorfold/families/glm5_next/cuda/dflash2.py
 +++ tensorfold/families/glm5_next/cuda/dflash2.py
-@@ -508,11 +508,14 @@ class Drafter:
+@@ -501,11 +501,14 @@ class Drafter:
  
      def chain(self, tokens: np.ndarray, values: np.ndarray, proj: np.ndarray, anchor: int, first: int,
                sampling: Sampling | None, confidence: float = 0.0, *, beta: float = 0.0,
@@ -43,7 +43,7 @@ index a96d90f..8b5ff07 100644
  
          depth = tokens.shape[0]
          sampled = sampling is not None and sampling.temperature > 0
-@@ -529,7 +532,13 @@ class Drafter:
+@@ -522,7 +525,13 @@ class Drafter:
              score = (values[d] + EDGE * edge) / temp
              pick = score + NOISE * noise[d] if noise is not None else score
              j = int(np.argmax(pick))
@@ -58,7 +58,7 @@ index a96d90f..8b5ff07 100644
                  c = noisy_confidence(score, noise[d] if noise is not None else None, j, beta)
                  if round_ms is not None:
                      conf.append(c)
-@@ -544,7 +553,7 @@ class Drafter:
+@@ -537,7 +546,7 @@ class Drafter:
                      break
              prev = int(tokens[d, j])
              out.append(prev)
@@ -68,10 +68,10 @@ index a96d90f..8b5ff07 100644
          return out
  
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 109dbf0..8154dc6 100644
+index 66fa9ca..32c01f3 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -506,17 +506,24 @@ class GlmEngine:
+@@ -502,17 +502,24 @@ class GlmEngine:
  
          self.dump = dump_dir() if drafter is not None and not serial_only and parallel == 1 else None
          quant_code = DRAFT_QUANTS.index(draft_quant())
@@ -98,7 +98,7 @@ index 109dbf0..8154dc6 100644
          # other conversations' kept prompts get what the window leaves, at most TF_GLM_CACHE_GIB, the same on both ranks
          plan = self.capacity_plan
          wanted = int(float(os.environ.get("TF_GLM_CACHE_GIB", "3")) * 2 ** 30)
-@@ -527,7 +534,8 @@ class GlmEngine:
+@@ -523,7 +530,8 @@ class GlmEngine:
                                 "TF_GLM_LATENT, TF_GLM_PREFILL_ROWS, TF_GLM_PROMPT_GRID, TF_GLM_KVB, TF_GLM_COPY_*, "
                                 "TF_GLM_HC_SPLIT*, TF_GLM_PREFILL_OVERLAP, TF_GLM_OVERLAP_PIECES, TF_GLM_DRAFT_DUMP, "
                                 "TF_GLM_DRAFT_QUANT, TF_GLM_SHARED_PREFIX, TF_GLM_DRAFT_RING, TF_GLM_MTP, --parallel, "
@@ -108,7 +108,7 @@ index 109dbf0..8154dc6 100644
                                 f"rank 0 {both[0][:-1]}, rank 1 {both[1][:-1]}; pull the draft model on both machines "
                                 "(or pass --drafter none to both) and give both the same flags")
          self.cache_bytes = min(both[0][-1], both[1][-1]) << 20
-@@ -644,7 +652,10 @@ class GlmEngine:
+@@ -641,7 +649,10 @@ class GlmEngine:
                  print(f"[tensorfold] --parallel {parallel}: up to {parallel} requests decode together, their caches "
                        f"in one pool of {pool_rows} tokens (each up to {self.limit}); DFlash2 drafts, prompt chunks of "
                        f"{self.multi.fill_rows} rows while others decode (TF_GLM_FILL_ROWS, TF_GLM_FILL_SHARE "

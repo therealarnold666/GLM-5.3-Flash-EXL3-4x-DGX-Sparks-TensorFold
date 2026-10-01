@@ -1,22 +1,8 @@
-diff --git tensorfold/cli.py tensorfold/cli.py
-index 6a3a9d2..72b1ec4 100644
---- tensorfold/cli.py
-+++ tensorfold/cli.py
-@@ -36,7 +36,8 @@ def build_parser() -> argparse.ArgumentParser:
-     endpoint.add_argument("--port", type=int, default=8080)
-     endpoint.add_argument("--name", default="", help="model id clients ask for (default: the model's name)")
-     endpoint.add_argument("--alias", action="append", default=[], help="another model id to answer to")
--    endpoint.add_argument("--vision", action="store_true", help="enable image input for Qwen3.5/3.8 dense vision checkpoints")
-+    endpoint.add_argument("--vision", action="store_true", help="enable image input for Qwen3.5/3.8 dense vision checkpoints, and "
-+                                                                "image and video input for GLM-5.3 Flash")
-     endpoint.add_argument("--vision-urls", action="store_true",
-                           help="with --vision, accept public HTTP(S) image URLs (default: data URLs only)")
- 
 diff --git tensorfold/cuda/server.py tensorfold/cuda/server.py
-index eef1b5f..31e0268 100644
+index 552720d..3707349 100644
 --- tensorfold/cuda/server.py
 +++ tensorfold/cuda/server.py
-@@ -353,11 +353,15 @@ class App:
+@@ -408,11 +408,15 @@ class App:
                  end = None if think_end is None or think_end in ids[len(prompt):] else think_end
                  extra["constraint"] = self._grammars().constraint(compiled, think_end=end, spec=spec)
              if prepared.vision is not None:          # a gate's continuation keeps the images, positions extended
@@ -37,10 +23,10 @@ index eef1b5f..31e0268 100644
              if not cached:
                  cached.append(int((stats or {}).get("cached") or 0))
 diff --git tensorfold/families/glm5_next/__init__.py tensorfold/families/glm5_next/__init__.py
-index f95a051..7076545 100644
+index 5d8cac3..a2f4a6f 100644
 --- tensorfold/families/glm5_next/__init__.py
 +++ tensorfold/families/glm5_next/__init__.py
-@@ -192,7 +192,8 @@ def cuda_engine(model_dir: str | Path, *, drafter: str = "", tp: int = 1, rank:
+@@ -222,7 +222,8 @@ def cuda_engine(model_dir: str | Path, *, drafter: str = "", tp: int = 1, rank:
      return GlmEngine(Path(model_dir), rank=int(rank), master=master, port=int(master_port), policy=policy,
                       drafter=Path(drafter) if drafter and not no_drafts else None,
                       context=options.get("context"), context_explicit=options.get("context_explicit"),
@@ -51,7 +37,7 @@ index f95a051..7076545 100644
  
  def __getattr__(name: str) -> Any:
 diff --git tensorfold/families/glm5_next/cuda/app.py tensorfold/families/glm5_next/cuda/app.py
-index 62d3d38..f46b66c 100644
+index 0b6d35e..350e5b0 100644
 --- tensorfold/families/glm5_next/cuda/app.py
 +++ tensorfold/families/glm5_next/cuda/app.py
 @@ -2,6 +2,7 @@
@@ -62,7 +48,7 @@ index 62d3d38..f46b66c 100644
  from typing import Any, Callable
  
  from tensorfold.cuda.server import App, PreparedRequest, RequestError
-@@ -16,16 +17,38 @@ class ThinkingOffTemplate:
+@@ -15,16 +16,38 @@ class ThinkingOffTemplate:
          self.inner = inner
          self.efforts = getattr(inner, "efforts", frozenset())
  
@@ -104,38 +90,39 @@ index 62d3d38..f46b66c 100644
  
      def check(self, body: dict[str, Any], *, prepared: PreparedRequest | None = None) -> str | None:
 diff --git tensorfold/families/glm5_next/cuda/decode.py tensorfold/families/glm5_next/cuda/decode.py
-index 6a01236..1df65cf 100644
+index f8b4ec4..4850d92 100644
 --- tensorfold/families/glm5_next/cuda/decode.py
 +++ tensorfold/families/glm5_next/cuda/decode.py
-@@ -310,8 +310,8 @@ def restore(e: Engine, snap: Snapshot, drafter=None) -> None:
+@@ -341,8 +341,8 @@ def restore(e: Engine, snap: Snapshot, drafter=None) -> None:
  # -- prefill ----------------------------------------------------------------------------------------------------
  @torch.no_grad()
  def prefill(e: Engine, prompt: Sequence[int], sampling: Sampling | None, *, mtp: bool = True, drafter=None,
--            resume: Snapshot | None = None) -> int:
+-            resume: Snapshot | None = None, keep_at: int | None = None, keep=None) -> int:
 -    """Commit the prompt in chunks and sample its first token; a resumed prompt ends in a fresh prefill's state."""
-+            resume: Snapshot | None = None, feed=None) -> int:
++            resume: Snapshot | None = None, keep_at: int | None = None, keep=None, feed=None) -> int:
 +    """Commit the prompt in chunks and sample its first token; a resumed prompt ends in a fresh prefill's state; ``feed``: an image prompt's feature rows (``engine.VisionFeed``)."""
  
      if not prompt:
          raise ValueError("prefill requires at least one token")
-@@ -337,7 +337,8 @@ def prefill(e: Engine, prompt: Sequence[int], sampling: Sampling | None, *, mtp:
-     for start in range(begin, len(prompt), e.prefill_rows):
-         chunk = list(prompt[start:start + e.prefill_rows])
+@@ -375,7 +375,9 @@ def prefill(e: Engine, prompt: Sequence[int], sampling: Sampling | None, *, mtp:
          R = len(chunk)
--        last = compute(w, st, b, stage(w, st, b, chunk), nch=chunks_for(st, R), host_pos=st.pos).clone()
+         point = keep_at - start if keep_at is not None else 0
+         cut = Cut(point, torch.empty_like(st.rec[0]), st.conv.clone()) if 0 < point < R else None
+-        last = compute(w, st, b, stage(w, st, b, chunk), nch=chunks_for(st, R), host_pos=st.pos, cut=cut).clone()
 +        inject = feed.chunk(start, R) if feed is not None else None
-+        last = compute(w, st, b, stage(w, st, b, chunk), nch=chunks_for(st, R), host_pos=st.pos, inject=inject).clone()
++        last = compute(w, st, b, stage(w, st, b, chunk), nch=chunks_for(st, R), host_pos=st.pos, cut=cut,
++                       inject=inject).clone()
          e.last_hidden = b.fnormed[R - 1:R].clone()
-         if drafter is not None:
-             drafter.add_taps(e.tap_rows(R, b))
+         if 0 < point <= R:
+             rec = cut.rec if cut is not None else st.rec[st.cur[0] if st.cur else 0].clone()
 diff --git tensorfold/families/glm5_next/cuda/engine.py tensorfold/families/glm5_next/cuda/engine.py
-index 3393fa0..c46aa52 100644
+index b29529c..47d2a02 100644
 --- tensorfold/families/glm5_next/cuda/engine.py
 +++ tensorfold/families/glm5_next/cuda/engine.py
-@@ -17,6 +17,22 @@ EXL3_AUTO = DFLASH_POLICY             # what auto runs on an EXL3 checkpoint wit
- GRAPH_ROWS = (1, 2, 3, 4, 5, 6)       # verify windows captured as CUDA graphs
- MAX_ROWS = 8                          # the widest verify window (a pending token and up to 7 drafts)
+@@ -19,6 +19,22 @@ MAX_ROWS = 8                          # the widest verify window (a pending toke
  DENSE_CAPACITY = 2560                 # cache slots while DSA attention stays dense (contexts up to 2,051 tokens)
+ # TF_GLM_DRAFT_RING=0: DFlash2's context in a flat buffer of the whole window, not a 2,176-row ring (the same drafts)
+ DRAFT_RING = os.environ.get("TF_GLM_DRAFT_RING", "1").strip() != "0"
 +# --vision (rank 0): what startup reserves beside the tower's 1.05 GiB of bf16 weights for an encode and its
 +# prompt's feature rows. Measured peaks: 0.47 GiB (a 2,048-token picture), 0.56 (four), 1.08 (a 16,384-token clip,
 +# 16,384 patches a pass), 1.73 (an 8,000-token picture, one 31,724-patch pass). A picture cap past 4,096 tokens
@@ -155,7 +142,7 @@ index 3393fa0..c46aa52 100644
  
  
  def encode_policy(spec: str) -> list[int]:
-@@ -86,8 +102,9 @@ class GlmEngine:
+@@ -110,8 +126,9 @@ class GlmEngine:
  
      def __init__(self, model_dir: Path, *, rank: int, master: str, port: int, policy: str = DEFAULT_POLICY,
                   drafter: Path | None = None, context: int | None = None, context_explicit: bool | None = None, serial_only: bool = False, comm=None,
@@ -167,10 +154,10 @@ index 3393fa0..c46aa52 100644
  
          import torch
  
-@@ -117,9 +134,22 @@ class GlmEngine:
-         weights_estimate = split_weights(rule)
-         if cfg.quant == "exl3" and dense_kind() == "fp8":
-             weights_estimate = fp8_weights(weights_estimate)
+@@ -146,9 +163,22 @@ class GlmEngine:
+         self.mtp_on = mtp_head(drafter is not None, serial_only, cfg.mtp_layers)
+         if not self.mtp_on:
+             weights_estimate = without_mtp(weights_estimate, cfg.layers)
 +        vision = bool(vision) and rank == 0
 +        workspace = vision_workspace() if vision else 0
 +        if vision:                           # the tower's bf16 weights, which the split rule drops
@@ -183,19 +170,19 @@ index 3393fa0..c46aa52 100644
 +        def geometry(text):
 +            from tensorfold.cuda.capacity import Geometry
 +
-+            g = mla_geometry(text, 2, MAX_ROWS, minimum_slots=DENSE_CAPACITY, latent=LATENT)
++            g = mla_geometry(text, 2, MAX_ROWS, minimum_slots=DENSE_CAPACITY, latent=LATENT, mtp=self.mtp_on)
 +            return Geometry(lambda slots: g.bytes_at(slots) + workspace, g.reserve, g.minimum_slots) if workspace else g
          self.capacity_plan = admit(model_dir, context if explicit else cfg.dense_limit, explicit, torch,
 -                                   lambda text: mla_geometry(text, 2, MAX_ROWS, minimum_slots=DENSE_CAPACITY,
--                                                             latent=LATENT),
+-                                                             latent=LATENT, mtp=self.mtp_on),
 +                                   geometry,
                                     weights_estimate, rank=rank, world=2, gather=self._gather_ints,
-                                    draft_dir=drafter, draft_geometry=lambda text: draft_geometry(text, 2, MAX_ROWS))
-         self.limit = self.capacity_plan["context_window"]
-@@ -170,6 +200,18 @@ class GlmEngine:
-             print("[tensorfold] drafter costs (ms): verify " + " ".join(f"{v:.1f}" for v in c["verify"]) +
-                   f"; MTP draft {c['mtp']:.2f} (+{c['mtp_step']:.2f} a chained draft, +{c['mtp_row']:.2f} a row); "
-                   f"DFlash2 block {c['block']:.2f} (+{c['taps_row']:.3f} a tap row)", flush=True)
+                                    draft_dir=drafter, draft_weights=lambda d: dflash2_weights(d, 2),
+                                    draft_geometry=lambda text: dflash2_geometry(text, 2, MAX_ROWS, ring=DRAFT_RING))
+@@ -206,6 +236,18 @@ class GlmEngine:
+                    if w.mtp is not None else "")
+             print("[tensorfold] drafter costs (ms): verify " + " ".join(f"{v:.1f}" for v in c["verify"]) + mtp +
+                   f"; DFlash2 block {c['block']:.2f} (+{c['taps_row']:.3f} a tap row)", flush=True)
 +        self.vision = None                   # rank 0's image tower (``tensorfold.vision.glm.GlmVision``), --vision
 +        if vision:
 +            from tensorfold.vision.glm import GlmVision
@@ -211,7 +198,7 @@ index 3393fa0..c46aa52 100644
          self.eos = tuple(w.cfg.eos)
          self.model_dir = Path(model_dir)
          self.request = threading.local()    # the calling request's policy and stop-at-EOS (``app.GlmApp``)
-@@ -361,15 +403,16 @@ class GlmEngine:
+@@ -424,15 +466,16 @@ class GlmEngine:
          return sum(snapshot_bytes(c) for c in self.cache)
  
      def _run(self, prompt: list[int], max_tokens: int, sampling, stop_eos: bool, on_tokens: Callable[[list[int]], Any],
@@ -228,25 +215,24 @@ index 3393fa0..c46aa52 100644
 -                  on_tokens: Callable[[list[int]], Any], code: list[int], hit, draft: bool) -> dict[str, Any]:
 +                  on_tokens: Callable[[list[int]], Any], code: list[int], hit, draft: bool,
 +                  feed=None) -> dict[str, Any]:
-         from .decode import DepthPolicy, dflash_decode, mtp_decode, prefill, serial_decode, take_snapshot
+         from .decode import DepthPolicy, dflash_decode, mtp_decode, prefill, serial_decode
          from .drafter_choice import DrafterChoice, auto_decode
  
-@@ -384,10 +427,11 @@ class GlmEngine:
+@@ -447,9 +490,10 @@ class GlmEngine:
          if hit is not None and hit.rows is not None:
              load_rows(self.e, hit)
              hit.rows, hit.nbytes = None, 0            # live again
 -        self.live = list(prompt)
--        first = prefill(self.e, prompt, sampling, mtp=use_mtp, drafter=drafter, resume=hit)
+-        first = prefill(self.e, prompt, sampling, mtp=use_mtp, drafter=drafter, resume=hit,
+-                        keep_at=max(1, len(prompt) - 1) if draft else None, keep=self._remember)
 +        # an image prompt's rows are not its token ids' rows: nothing resumes from them, and they are not kept
 +        self.live = list(prompt) if feed is None else []
-+        first = prefill(self.e, prompt, sampling, mtp=use_mtp, drafter=drafter, resume=hit, feed=feed)
++        first = prefill(self.e, prompt, sampling, mtp=use_mtp, drafter=drafter, resume=hit, feed=feed,
++                        keep_at=max(1, len(prompt) - 1) if draft and feed is None else None, keep=self._remember)
          prefill_s = time.perf_counter() - t0
--        if draft:
-+        if draft and feed is None:
-             self._remember(take_snapshot(self.e, prompt, self.e.last_hidden if use_mtp else None, mtp=use_mtp,
-                                          drafter=drafter))
          stats: dict[str, Any] = {"prefill_s": prefill_s, "cached": cut}
-@@ -415,7 +459,8 @@ class GlmEngine:
+         on_tokens([first])
+@@ -476,7 +520,8 @@ class GlmEngine:
              res = mtp_decode(self.e, first, max_tokens, sampling, policy=policy, stop_eos=stop_eos,
                               on_tokens=on_tokens)
          # the caches now hold prompt and reply; only prompts are snapshotted, since a later prompt prefills the reply again
@@ -256,7 +242,7 @@ index 3393fa0..c46aa52 100644
          stats.update(decode_s=res.seconds, rounds=res.rounds, min_rows=1 + min(res.depths, default=0),
                       tokens_per_round=round((len(res.tokens) - 1) / max(res.rounds, 1), 3),
                       sha256=hashlib.sha256(json.dumps(res.tokens).encode()).hexdigest()[:16])
-@@ -426,8 +471,8 @@ class GlmEngine:
+@@ -487,8 +532,8 @@ class GlmEngine:
          return stats
  
      def generate(self, prompt: list[int], max_tokens: int, sampling, on_tokens, draft: bool = True,
@@ -267,7 +253,7 @@ index 3393fa0..c46aa52 100644
  
          if len(prompt) >= self.limit:
              raise ValueError(f"prompt of {len(prompt)} tokens: this engine serves contexts up to {self.limit}")
-@@ -438,21 +483,39 @@ class GlmEngine:
+@@ -499,13 +544,27 @@ class GlmEngine:
              spec = getattr(self.request, "policy", None) or self.policy
          code = self._effective(encode_policy(spec))
          stop_eos = bool(getattr(self.request, "stop_eos", True))
@@ -296,7 +282,8 @@ index 3393fa0..c46aa52 100644
 +                  int(constraint is not None), len(positions)] + code
          from tensorfold.engine.grammar import pack
  
-         self._share(header)
+         self._ring()                                   # wakes rank 1, which idles on the store, not in the all-gather
+@@ -513,8 +572,12 @@ class GlmEngine:
          self._share(list(prompt))
          if constraint is not None:                     # the request's grammar: rank 1 compiles the same
              self._share(pack(constraint))
@@ -310,16 +297,16 @@ index 3393fa0..c46aa52 100644
          return stats
  
      def follow(self) -> None:
-@@ -462,7 +525,7 @@ class GlmEngine:
- 
+@@ -525,7 +588,7 @@ class GlmEngine:
          while True:
+             self._await_bell()
              (max_tokens, stop_eos, draft, cached, s_lo, s_hi, s_top, t_lo, t_hi, top_k, p_lo, p_hi, m_lo, m_hi, shaped,
 -             *code) = self._share(None)
 +             images, *code) = self._share(None)
              prompt = self._share(None)
              packed = self._share(None) if shaped else []
              constraint = None
-@@ -470,6 +533,7 @@ class GlmEngine:
+@@ -533,6 +596,7 @@ class GlmEngine:
                  from tensorfold.engine import grammar
  
                  constraint = grammar.compiler(self, self.model_dir, self.eos).follow(packed)
@@ -327,7 +314,7 @@ index 3393fa0..c46aa52 100644
              temperature = _ints_f64(t_lo, t_hi)
              seed = (s_top << 62) | (s_hi << 31) | s_lo
              sampling = (Sampling(seed, temperature, top_k, _ints_f64(p_lo, p_hi), _ints_f64(m_lo, m_hi))
-@@ -480,4 +544,32 @@ class GlmEngine:
+@@ -543,4 +607,32 @@ class GlmEngine:
                  if hit is None:
                      raise RuntimeError(f"rank 1 has no snapshot of the {cached} tokens rank 0 resumes from")
              self._run(prompt, max_tokens, sampling, bool(stop_eos), lambda new: None, code, hit, bool(draft),
@@ -362,26 +349,41 @@ index 3393fa0..c46aa52 100644
 +        index = torch.tensor([p - start for p in self.positions[lo:hi]], dtype=torch.int64, device="cuda")
 +        return index, both[:n]
 diff --git tensorfold/families/glm5_next/cuda/forward.py tensorfold/families/glm5_next/cuda/forward.py
-index cd3cfc8..f5f6179 100644
+index f73f253..225109f 100644
 --- tensorfold/families/glm5_next/cuda/forward.py
 +++ tensorfold/families/glm5_next/cuda/forward.py
-@@ -436,11 +436,14 @@ def stage(w: Weights, st: State, b: Buffers, tokens: Sequence[int]) -> int:
+@@ -472,13 +472,16 @@ def stage(w: Weights, st: State, b: Buffers, tokens: Sequence[int]) -> int:
  
  
  def compute(w: Weights, st: State, b: Buffers, R: int, *, logits: bool = True, nch: int | None = None,
--            host_pos: int | None = None, sparse_np: int | None = None):
+-            host_pos: int | None = None, sparse_np: int | None = None, cut: Cut | None = None):
 -    """Run capturable GPU work on static buffers and device positions; eager long contexts use host_pos (graphs sparse_np) to select sparse attention."""
-+            host_pos: int | None = None, sparse_np: int | None = None, inject=None):
++            host_pos: int | None = None, sparse_np: int | None = None, cut: Cut | None = None, inject=None):
 +    """Run capturable GPU work on static buffers and device positions; eager long contexts use host_pos (graphs sparse_np) to select sparse attention; ``inject``: (rows, features) replacing those rows' embeddings (an image prompt's tower output, on every hyper-connection stream)."""
  
+     if cut is not None and (not b.prefill or not 0 < cut.point < R):
+         raise ValueError("a prompt cut must lie inside a prefill chunk")
      c = w.cfg
      glue.embed(b.ids[:R], w.embed, c.hidden, c.streams, b.x[:R])
 +    if inject is not None:
 +        rows, features = inject
 +        b.x.index_copy_(0, rows, features.repeat(1, c.streams))
      for layer in w.layers:
-         layer_forward(layer, w, st, b, R, nch, host_pos, sparse_np)
+         layer_forward(layer, w, st, b, R, nch, host_pos, sparse_np, cut)
          for slot in b.tap_at.get(layer.index, ()):
+diff --git tensorfold/serve_options.py tensorfold/serve_options.py
+index 658f828..f36736e 100644
+--- tensorfold/serve_options.py
++++ tensorfold/serve_options.py
+@@ -13,8 +13,6 @@ def check(args: argparse.Namespace, family: Any, backend: str, config_dir: Any =
+     if getattr(args, "vision_urls", False) and not getattr(args, "vision", False):
+         raise ValueError("--vision-urls needs --vision")
+     if getattr(args, "vision", False):             # only --vision reads the config here
+-        if family.model_type == "glm5_next" and backend != "mlx":
+-            raise ValueError("GLM-5.3-Flash image input is currently MLX-only")
+         from tensorfold.families import read_config
+         from tensorfold.vision.config import validate_vision_config
+ 
 diff --git tensorfold/server/messages.py tensorfold/server/messages.py
 index 24bbd82..dde2b67 100644
 --- tensorfold/server/messages.py
@@ -414,7 +416,7 @@ index 24bbd82..dde2b67 100644
                      raise RequestError("a text content part must contain a text string")
              out.append({**message, "content": list(content)})
 diff --git tensorfold/server/prompts.py tensorfold/server/prompts.py
-index ebf64e7..52e8009 100644
+index 1b709a7..ee19680 100644
 --- tensorfold/server/prompts.py
 +++ tensorfold/server/prompts.py
 @@ -18,7 +18,7 @@ class RenderedPrompt:
@@ -457,26 +459,6 @@ index ebf64e7..52e8009 100644
      except (ImageInputError, ValueError, ImportError) as exc:
          raise RequestError(str(exc)) from exc
      finally:
-diff --git tensorfold/vision/config.py tensorfold/vision/config.py
-index ef30d5a..3ce4733 100644
---- tensorfold/vision/config.py
-+++ tensorfold/vision/config.py
-@@ -2,9 +2,13 @@
- from __future__ import annotations
- 
- 
-+FAMILIES = ('qwen3_5', 'glm5_next')     # the Qwen3.5/3.8 dense models, and GLM-5.3 Flash (rank 0's tower) on CUDA
-+
-+
- def validate_vision_config(config, family):
--    if family != 'qwen3_5':
--        raise ValueError('--vision currently supports Qwen3.5/3.8 dense checkpoints with their vision tower')
-+    if family not in FAMILIES:
-+        raise ValueError('--vision currently supports Qwen3.5/3.8 dense and GLM-5.3 Flash checkpoints with their '
-+                         'vision tower')
-     vision = config.get('vision_config')
-     text = config.get('text_config', config)
-     if not isinstance(vision, dict) or not vision:
 diff --git tensorfold/vision/glm.py tensorfold/vision/glm.py
 new file mode 100644
 index 0000000..77a96f9
