@@ -8,6 +8,22 @@ worker() { ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 "
 # into it and start.sh mounts it into rank 1.
 worker_hf_cache() { worker 'echo "${HF_HOME:-$HOME/.cache/huggingface}"'; }
 
+# WORKER_WEIGHTS=nfs: rank 1 mounts the head's HF_CACHE read-only through the docker volume NFS_VOLUME on the worker.
+# ensure_nfs_volume creates it (or checks the one there names the same export); worker_nfs <cmd...> runs a command in
+# a throwaway container with the volume at /hf.
+ensure_nfs_volume() {
+  local server="${NFS_SERVER:-$HEAD_ADDR}" have
+  have=$(worker "docker volume inspect -f '{{index .Options \"device\"}} {{index .Options \"o\"}}' '$NFS_VOLUME'" 2>/dev/null || true)
+  if [[ -z "$have" ]]; then
+    worker "docker volume create --driver local --opt type=nfs --opt device=':$NFS_PATH' \
+      --opt o='addr=$server,nfsvers=4.2,ro,nconnect=8,rsize=1048576,wsize=1048576,hard,timeo=600' '$NFS_VOLUME'" >/dev/null ||
+      die "could not create the docker volume $NFS_VOLUME on the worker"
+  elif [[ "${have%% *}" != ":$NFS_PATH" || "$have" != *"addr=$server,"* ]]; then
+    die "the worker's docker volume $NFS_VOLUME is ${have%% *} from ${have#* }, not :$NFS_PATH from $server: remove it there (docker volume rm $NFS_VOLUME) or set NFS_VOLUME / NFS_PATH"
+  fi
+}
+worker_nfs() { worker "docker run --rm --entrypoint '$1' -v '$NFS_VOLUME:/hf:ro' '$IMAGE' $(printf '%q ' "${@:2}")"; }
+
 need_worker() {
   [[ -n "${WORKER:-}" ]] || die "WORKER is not set: put WORKER=user@<worker address> in scripts/local.sh (see scripts/local.sh.example)"
   worker true 2>/dev/null || die "cannot ssh to $WORKER without a password: set up key-based ssh (ssh-copy-id $WORKER)"

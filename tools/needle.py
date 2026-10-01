@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Needle in a haystack at ~195k tokens: a passphrase hidden at ~60% depth of random prose, asked for greedily.
 
-Usage: tools/needle.py [label] [size]   (size: bench.prose's length parameter, the prompt comes out at ~0.8 x size
-tokens; default 248000, ~195k tokens. API_URL / PORT as in bench.py). Exit code 1 if the answer is wrong.
+Usage: tools/needle.py [label] [size]   (size: client.prose's length parameter, the prompt comes out at ~0.8 x size
+tokens; default 248000, ~195k tokens. API_URL / PORT as in client.py). Exit code 1 if the answer is wrong.
 """
 import json
 import os
@@ -10,8 +10,8 @@ import sys
 import time
 import urllib.request
 
-sys.dont_write_bytecode = True           # no tools/__pycache__ from importing bench
-from bench import URL, open_url, prose  # noqa: E402
+sys.dont_write_bytecode = True           # no tools/__pycache__ from importing client
+from client import URL, open_url, prose  # noqa: E402
 
 SECRET = "violet-harbor-7291"
 

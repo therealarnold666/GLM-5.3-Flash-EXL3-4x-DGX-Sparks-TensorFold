@@ -24,7 +24,7 @@ vision, tool calling, `/tokenize` and `/metrics`.
 - Drafter: [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), or the checkpoint's
   own MTP head (`DRAFTER`, see [Configuration](#configuration))
 - API model id: `GLM-5.3-Flash-EXL3`
-- Context: **1,048,576 tokens** a request; the 4 requests share an FP8 KV pool of about **2.7M tokens** (2,684,928 at the measured start)
+- Context: **1,048,576 tokens** a request; the 4 requests share an FP8 KV pool of about **2.9M tokens** (2,852,864 at the measured start)
 - Tool calling, structured outputs (xgrammar), `/tokenize`, and `reasoning_effort` `low` / `high` / `max`
 - One command on the first Spark: `./start.sh` sets up both Sparks and starts both ranks; `./stop.sh` stops them
 
@@ -86,7 +86,8 @@ of 11 sent in a burst).
 - **Disk, on each Spark:** ~205 GB: ~176 GB (164 GiB) for the checkpoint and ~2.3 GB for DFlash2 under
   `~/.cache/huggingface`, ~25 GB for the image under Docker's root. `prepare.sh` wants 180 GB free for the download
   (`MIN_FREE_GB`) and 35 GB under Docker's root (`IMAGE_FREE_GB`; the sum when they share a filesystem), and checks the
-  worker before the copy.
+  worker before the copy. With `WORKER_WEIGHTS=nfs` the worker needs only the image
+  ([Worker weights over NFS](#worker-weights-over-nfs)).
 - Optional: the `hf` CLI on the head (faster download) and a Hugging Face token (`~/.cache/huggingface/token` or
   `HF_TOKEN`).
 
@@ -221,13 +222,13 @@ caches from **one shared pool**:
 | Requests at once (`PARALLEL`) | 4 |
 | Window per request (`CONTEXT`, the model's native maximum) | 1,048,576 tokens |
 | KV precision (`KV`) | FP8 (e4m3 rows with a power-of-two scale each: half of bf16's bytes) |
-| **Shared pool** (what is free at start minus `MEMORY_RESERVE_GIB` 14.5, at most `KV_POOL_GIB` 11 GiB a Spark beyond the window) | **2,684,928 tokens** at the measured start (~2.1-2.7M depending on free memory) |
+| **Shared pool** (what is free at start minus `MEMORY_RESERVE_GIB` 14.5, at most `KV_POOL_GIB` 12.5 GiB a Spark beyond the window) | **2,852,864 tokens** at the measured start (~2.1-2.9M depending on free memory) |
 | Rank 0's startup estimate | 88.09 GiB |
-| Free memory (`MemAvailable`) at idle | 8.2 GiB on rank 0, 11.8 GiB on rank 1 |
-| Lowest free memory under a 1M-token prompt | 6.3 GiB on rank 0, 10.8 GiB on rank 1 |
+| Free memory (`MemAvailable`) at idle | 7.8 GiB on rank 0, 10.8 GiB on rank 1 |
+| Lowest free memory under a 1M-token prompt | 4.7 GiB on rank 0, 8.8 GiB on rank 1 |
 
 Any one request can grow to the full window, and the four together share the pool: e.g. one 1M-token conversation
-next to one more of 1M, or next to three of ~450k. A request the pool cannot place yet waits until others finish (kept prompt states give way
+next to one more of 1M, or next to three of ~600k. A request the pool cannot place yet waits until others finish (kept prompt states give way
 first); `/health` shows `pool_tokens`, `pool_free_tokens` and the streams decoding, filling and paused.
 
 TensorFold's budget on each Spark is `MemAvailable` at start minus a host reserve (`MEMORY_RESERVE_GIB`, 14.5 GiB here;
@@ -243,6 +244,27 @@ Other settings' windows:
 | `KV=bf16 DRAFTER=mtp` | 524,288 | one request at a time |
 | `CONTEXT=0` | the largest that fits | no memory is left to keep other conversations' prompts |
 
+## Worker weights over NFS
+
+By default the worker keeps its own copy of the checkpoint and DFlash2 (~166 GiB, copied over the link by
+`prepare.sh`). With `WORKER_WEIGHTS=nfs` it keeps none: rank 1 reads the head's Hugging Face cache over NFS, read-only.
+Loading is as fast as from the worker's own disk (both ranks were live in ~2.2 minutes).
+
+1. On the head, export the cache to the worker once (this needs root; the worker needs nothing installed):
+
+   ```bash
+   sudo apt install nfs-kernel-server
+   echo "$HOME/.cache/huggingface <worker CX7 address>(ro,no_subtree_check)" | sudo tee -a /etc/exports
+   sudo exportfs -ra
+   ```
+
+2. Put `WORKER_WEIGHTS=nfs` in `scripts/local.sh` or `.env`, and run `./start.sh restart`.
+
+`prepare.sh` then creates a read-only docker NFS volume on the worker (`NFS_VOLUME`, default `glm53-hf`, no sudo) and
+checks that the worker sees every file of both snapshots as the head has them, instead of copying. `NFS_PATH` is the
+exported path as the worker mounts it (default: the head's `HF_CACHE`; `/` for an NFSv4 export with `fsid=0`), and
+`NFS_SERVER` the head's address (default: its address on the link).
+
 ## Configuration
 
 Every setting lives in [`scripts/config.sh`](scripts/config.sh). Set one for a single run from the environment
@@ -257,7 +279,8 @@ sets a value wins: the environment, then `scripts/local.sh`, then `.env`, then t
 | `PARALLEL` | `4` (`1` with `DRAFTER=mtp`) | requests decoded together, 1 to 4 (above 1 needs `DRAFTER=dflash2`) |
 | `CONTEXT` | `1048576` | prompt + reply window per request (with `KV=fp8`; other defaults in [KV pool and memory](#kv-pool-and-memory)); `0`: the largest that fits |
 | `KV` | `fp8` | `fp8` or `bf16` (exact, shorter window) DSA latent cache and indexer keys |
-| `KV_POOL_GIB` / `MEMORY_RESERVE_GIB` | `11` / `14.5` | the shared pool beyond the window (kept prompts, more long conversations at once) grows into what is free at start minus the reserve, up to `KV_POOL_GIB` GiB a Spark; the reserve sets the lowest free memory on the head (~4.5-6.3 GiB); raise it when other work shares the Sparks |
+| `WORKER_WEIGHTS` | `copy` | `copy`: the worker keeps its own copy of the weights; `nfs`: it reads the head's over NFS ([Worker weights over NFS](#worker-weights-over-nfs)); with `NFS_PATH`, `NFS_SERVER`, `NFS_VOLUME` |
+| `KV_POOL_GIB` / `MEMORY_RESERVE_GIB` | `12.5` / `14.5` | the shared pool beyond the window (kept prompts, more long conversations at once) grows into what is free at start minus the reserve, up to `KV_POOL_GIB` GiB a Spark; the reserve sets the lowest free memory on the head (~4.5-5 GiB); raise it when other work shares the Sparks |
 | `DENSE` | `q4` | the checkpoint's BF16 weights (attention, shared experts, dense layers, head): `q4` (4-bit groups of 64, head and kv_b in FP8), `fp8` or `bf16` |
 | `DRAFTER` | `dflash2` | `dflash2`: IncoAI's DFlash2 drafter, licensed [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/), **non-commercial use only**; +5-10% decode. `mtp`: the checkpoint's own MTP head, one request at a time, which avoids that license (set it before the first `./start.sh` and DFlash2 is never downloaded) |
 | `DRAFT_POLICY` | `fnc7:0.3` | how many DFlash2 drafts a round verifies: up to 7, until the drafts' chance under the request's own sampling noise drops below 0.3 |
@@ -361,12 +384,12 @@ move the same bits. Three defaults are not exact against the checkpoint in bf16,
 close to the serial kernel but not its bits.
 `DENSE=bf16 KV=bf16 KDA_CHUNKED=0` serves the checkpoint as it is, with a shorter window ([KV pool and memory](#kv-pool-and-memory)).
 
-The scripts in `tools/` talk to the running server (`API_URL`, default `http://127.0.0.1:8888`; or just `PORT`),
-from the head or another machine (`API_URL=http://<head-address>:8888 tools/bench.py`):
+The checks in `tools/` talk to the running server (`API_URL`, default `http://127.0.0.1:8888`; or just `PORT`),
+from the head or another machine (`API_URL=http://<head-address>:8888 tools/needle.py`). Performance is measured
+with [sparkDash](https://github.com/MiaAI-Lab/sparkDash) ([Performance](#performance)).
 
 | Script | What it does |
 | --- | --- |
-| `tools/bench.py [label]` | prefill at ~0.8k / 3.3k / 13k / 52k tokens (fresh random prompts) and a short decode check |
 | `tools/needle.py [label] [size]` | hides a passphrase in a ~195k-token prompt (the prompt comes out at ~0.8 x `size` tokens) and checks the model returns it |
 | `tools/toolcheck.py` | makes a tool call with an array parameter and checks it comes back as a JSON array |
 
@@ -379,7 +402,7 @@ scripts/      config.sh (all settings), local.sh.example (this setup's WORKER), 
               both Sparks), nodes.sh (ssh and the RoCE link), publish-image.sh (push the image to GHCR),
               banner.sh (start.sh's banner)
 patches/      patches baked into the image
-tools/        benchmark and checks
+tools/        checks against the running server (needle, tool calls)
 CHANGELOG.md  what changed in each release
 CREDITS.md    who and what this builds on
 LICENSE       Apache License 2.0

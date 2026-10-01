@@ -3,6 +3,36 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.2 (2026-10-01): bigger KV pool, worker weights over NFS
+
+Image unchanged: `v0.5.0-cb7c56f7f921` (`sha256:6ee3c6e0430040b69ddcb0c96c7fbbcb94a5bed47d48a8ba092626369ae533b9`),
+53 patches.
+
+### Added
+- `WORKER_WEIGHTS=nfs`: the worker keeps no copy of the checkpoint and DFlash2 (~166 GiB less disk on it). Rank 1
+  reads the head's Hugging Face cache read-only over NFS, through a docker volume that `prepare.sh` creates on the
+  worker (no sudo there), after checking the worker sees every file of both snapshots as the head has them. The head
+  exports its cache once (README: Worker weights over NFS). Settings `NFS_PATH`, `NFS_SERVER`, `NFS_VOLUME`. The
+  default stays `copy`. Measured: both ranks live in ~2.2 minutes, as with a local copy.
+
+### Changed
+- `KV_POOL_GIB` 11 -> **12.5**: the shared KV pool is **2,852,864 tokens** at the measured start (was 2,684,928),
+  ~2.1-2.9M depending on what is free at start. Lowest free memory under a 1M-token prompt: 4.7 GiB on the head,
+  8.8 GiB on the worker (was 6.3 / 10.8); idle 7.8 / 10.8 GiB.
+- `prepare.sh` and `start.sh` no longer show TensorFold's "EXL3 support is experimental" note: this recipe serves
+  the EXL3 checkpoint on purpose, and its replies are checked exact.
+
+### Removed
+- `tools/bench.py`. The recipe's performance numbers come from
+  [sparkDash](https://github.com/MiaAI-Lab/sparkDash), measured through the OpenAI API from another machine, so a
+  second benchmark in the repo only gave numbers that did not match the published ones. Its shared helpers (the
+  server URL, error messages, random prose) moved to `tools/client.py`; `tools/needle.py` and `tools/toolcheck.py`
+  stay as correctness checks.
+
+### Unchanged
+- Replies: the exactness checks (reference shas, drafted == serial 6/6, concurrency 22/22, images and videos, tool
+  calls) equal v1.1's, and the 1M-token needle is found (981,841 tokens, 967 s).
+
 ## v1.1 (2026-10-01): up to 50 images and 4 videos a request
 
 Image `v0.5.0-cb7c56f7f921` (`sha256:6ee3c6e0430040b69ddcb0c96c7fbbcb94a5bed47d48a8ba092626369ae533b9`), 53 patches.
