@@ -8,6 +8,16 @@ worker() { ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 "
 # into it and start.sh mounts it into rank 1.
 worker_hf_cache() { worker 'echo "${HF_HOME:-$HOME/.cache/huggingface}"'; }
 
+# An image's identity by content (its layers' diffIDs and runtime config), the same under Docker's overlay2 and
+# containerd image stores: .Id is the config digest under one and the manifest digest under the other, so it never
+# matches across a mixed pair (issue #8). The template holds no spaces: worker() passes it through ssh, which
+# re-splits arguments. A missing image is "missing".
+IMAGE_IDENT='{{.RootFS.Layers}}{{.Config.Env}}{{.Config.Entrypoint}}{{.Config.Cmd}}{{.Config.WorkingDir}}'
+image_ident() { local s; s=$(docker image inspect -f "$IMAGE_IDENT" "$1" 2>/dev/null) && sha256sum <<<"$s" | cut -c1-64 || echo missing; }
+worker_image_ident() {
+  local s; s=$(worker docker image inspect -f "$IMAGE_IDENT" "$1" 2>/dev/null) && sha256sum <<<"$s" | cut -c1-64 || echo missing
+}
+
 # WORKER_WEIGHTS=nfs: rank 1 mounts the head's HF_CACHE read-only through the docker volume NFS_VOLUME on the worker.
 # ensure_nfs_volume creates it (or checks the one there names the same export); worker_nfs <cmd...> runs a command in
 # a throwaway container with the volume at /hf.

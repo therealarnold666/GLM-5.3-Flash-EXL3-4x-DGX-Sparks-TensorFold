@@ -108,20 +108,20 @@ fi
 docker run --rm --entrypoint tensorfold "$IMAGE" --version 2>/dev/null | tail -1
 
 # ---------------------------------------------------------------- 3. image (worker)
-image_id=$(docker image inspect -f '{{.Id}}' "$IMAGE")
-if [[ "$(worker docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null)" != "$image_id" ]]; then
+image_id=$(image_ident "$IMAGE")                    # by content: .Id differs between image stores (issue #8)
+if [[ "$(worker_image_ident "$IMAGE")" != "$image_id" ]]; then
   wfree=$(worker_free_gb "$WORKER_DOCKER_ROOT")
   (( wfree >= IMAGE_FREE_GB )) ||
     die "only ${wfree} GB free under the worker's Docker root ($WORKER_DOCKER_ROOT); the image needs ~${IMAGE_FREE_GB} GB (IMAGE_FREE_GB)"
   if [[ "${PULL:-1}" == 1 ]] && worker docker pull "$prebuilt" >/dev/null 2>&1 &&
-     [[ "$(worker docker image inspect -f '{{.Id}}' "$prebuilt")" == "$image_id" ]]; then
+     [[ "$(worker_image_ident "$prebuilt")" == "$image_id" ]]; then
     worker docker tag "$prebuilt" "$IMAGE"
     log "Using $prebuilt as $IMAGE on the worker"
   else
     log "Copying $IMAGE to the worker (docker save | docker load; only missing layers are stored)"
     docker save "$IMAGE" | worker docker load >/dev/null
   fi
-  [[ "$(worker docker image inspect -f '{{.Id}}' "$IMAGE")" == "$image_id" ]] || die "the worker's $IMAGE differs from the head's"
+  [[ "$(worker_image_ident "$IMAGE")" == "$image_id" ]] || die "the worker's $IMAGE differs from the head's"
 fi
 log "Image $IMAGE identical on both Sparks"
 

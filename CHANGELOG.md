@@ -3,6 +3,16 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.3.1 (2026-10-01): mixed Docker image stores
+
+Image unchanged: `v0.6.0-ae8d1c789b47`.
+
+### Fixed
+- **#8, `prepare.sh` failed on every run when the two Sparks use different Docker image stores** (containerd on one,
+  overlay2 on the other): it compared image `.Id`s, which is the manifest digest under containerd and the config
+  digest under overlay2, so the same image never matched. Images are now compared by content (their layers' diffIDs
+  and runtime config), the same under both stores. Fix by @eleata, confirmed by @kafej.
+
 ## v1.3 (2026-10-01): TensorFold v0.6.0, issue fixes #2 and #6, whole tool calls
 
 Image `v0.6.0-ae8d1c789b47` (`sha256:22789f0cb3dc308f0b2ce52a33961b88bd624af1725e91e8aba0a74a671bb969`), 53 patches.
