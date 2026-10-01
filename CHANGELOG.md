@@ -3,6 +3,30 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.3.1 (2026-10-01): prompt cache in interactive sessions, setup fixes
+
+Image unchanged: `v0.6.0-ae8d1c789b47`.
+
+### Changed
+- **`TF_GLM_MULTI_LONE` now defaults to 0** (#12, #13). With 1, a request decoding alone moved to the pool's first rows
+  for the one-stream graphs and evicted the other conversations' kept prompts there, so conversations taking turns
+  re-read their whole histories. Measured with three conversations taking turns (~4.5k tokens each, 6 warm turns):
+  0% of the prompts came from the cache with 1, 98.1% with 0. The one-stream graphs gave +0.6-0.9% at 1 stream; `1`
+  still turns them on. Reported by @abhicnv007 and @kky42.
+
+### Fixed
+- **#9, `prepare.sh` picked the LAN port when `WORKER` is a LAN address.** When the route to the worker leaves through
+  a port without RoCE and `FABRIC_PEER` is unset, the worker's CX7 address that a local CX7 port reaches directly is
+  now found and used (logged). Reported by @ttnghia.
+- **#15, the weight copy to the worker missed files downloaded with huggingface_hub's xet backend:** their blobs are
+  links into the cache root's `blobs/`, outside the copied folder. The copy now follows those links. Reported by
+  @huitseeker.
+- **#8, `prepare.sh` failed on every run when the two Sparks use different Docker image stores** (containerd on one,
+  overlay2 on the other): it compared image `.Id`s, which is the manifest digest under containerd and the config
+  digest under overlay2, so the same image never matched. Images are now compared by content (their layers' diffIDs
+  and runtime config), the same under both stores. Fix by @eleata, confirmed by @kafej; also reported in #14 by
+  @huitseeker.
+
 ## v1.3 (2026-10-01): TensorFold v0.6.0, issue fixes #2 and #6, whole tool calls
 
 Image `v0.6.0-ae8d1c789b47` (`sha256:22789f0cb3dc308f0b2ce52a33961b88bd624af1725e91e8aba0a74a671bb969`), 53 patches.

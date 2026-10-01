@@ -146,9 +146,11 @@ export TF_GLM_KDA_CHUNKED="$KDA_CHUNKED"
 COPY_CODE="${COPY_CODE:-1}"
 _w=0; [[ "$COPY_CODE" == 1 ]] && _w=16
 export TF_GLM_WIDE_GRAPHS="$_w" TF_GLM_COPY_REPLY_MATCH="$_w"
-# --parallel: a request alone runs on the one-stream graphs (patch 0035; 1, default) instead of the batched ones (0):
-# +0.6-0.9% at 1 stream (two boots each); replies served together still equal the same requests served alone. Exact.
-export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-1}"
+# --parallel: a request alone runs on the one-stream graphs (patch 0035; 1) instead of the batched ones (0, default):
+# +0.6-0.9% at 1 stream, but to use them the stream moves to the pool's first rows and evicts the other conversations'
+# kept prompts there, so interactive sessions miss the prompt cache and re-read whole histories (issues #12, #13).
+# Off by default until that move keeps them. Exact either way.
+export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-0}"
 # Waiting prompts filled together in one forward (patch 0049): shared work (expert weights, glue, projections) runs once
 # for every waiting prompt, attention per prompt on its own state, so each gets the bits it gets alone. sparkDash, prose at
 # 4 at once: 103.4 -> 108.8 tok/s, time to first token 590 -> 340 ms; structured at 3 / 4 at once: 175.2 -> 196.3 and
