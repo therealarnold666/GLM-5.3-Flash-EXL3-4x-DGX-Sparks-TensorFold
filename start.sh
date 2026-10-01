@@ -21,6 +21,7 @@
 #            SHARED_PREFIX, MULTI_PREFILL, KV_POOL_GIB, MEMORY_RESERVE_GIB, THINKING, VISION, VISION_URLS, COMM, SERVED_NAME, HOST, PORT
 #   nodes    WORKER, FABRIC_PEER, MASTER_PORT, NCCL_RAILS (1: one CX7 port), NCCL_CHANNELS, NCCL_DEBUG
 #   files    MODEL_ID, MODEL_REVISION, DFLASH2_ID, DFLASH2_REVISION, HF_CACHE (default: HF_HOME), KERNEL_CACHE,
+#            WORKER_WEIGHTS (copy | nfs: rank 1 reads the head's HF_CACHE over NFS), NFS_PATH, NFS_SERVER, NFS_VOLUME,
 #            STATE_DIR, HF_HUB_OFFLINE=0 (let TensorFold reach the Hub; default serves from the local cache only)
 #   image    IMAGE, TF_VERSION, TF_REPO, BASE_IMAGE, GHCR_IMAGE, IMAGE_TAG / IMAGE_DIGEST (the pinned published
 #            image), CONTAINER_NAME
@@ -55,6 +56,7 @@ SERVE_ARGS=(--context "$CONTEXT" --parallel "$PARALLEL")
 [[ "$PARALLEL" =~ ^[1-4]$ ]] || die "PARALLEL is 1 to 4, not $PARALLEL"
 [[ "$DRAFTER" == dflash2 || "$PARALLEL" == 1 ]] || die "PARALLEL=$PARALLEL needs DRAFTER=dflash2 (mtp serves one request at a time: PARALLEL=1)"
 for v in SPLIT SHARED_PREFIX KDA_CHUNKED COPY_CODE MULTI_PREFILL; do [[ "${!v}" =~ ^[01]$ ]] || die "$v is 0 or 1, not ${!v}"; done
+[[ "$WORKER_WEIGHTS" == copy || "$WORKER_WEIGHTS" == nfs ]] || die "WORKER_WEIGHTS is copy or nfs, not $WORKER_WEIGHTS"
 [[ "$KV_POOL_GIB" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "KV_POOL_GIB is a number of GiB, not $KV_POOL_GIB"
 [[ "$MEMORY_RESERVE_GIB" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "MEMORY_RESERVE_GIB is a number of GiB, not $MEMORY_RESERVE_GIB"
 [[ "$COPY_MAX" =~ ^([1-9]|1[0-5])$ ]] || die "COPY_MAX is 1 to 15, not $COPY_MAX"
@@ -133,13 +135,20 @@ worker docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missin
 # ranks read them offline, whatever the Hub's main is now. The worker's cache is its own HF_HOME (prepare.sh copies
 # into the same place).
 WORKER_HF=$(worker_hf_cache)
+WORKER_MOUNT="$WORKER_HF:/root/.cache/huggingface"                 # rank 1's cache: its own copy, or the head's (nfs)
+[[ "$WORKER_WEIGHTS" == nfs ]] && WORKER_MOUNT="$NFS_VOLUME:/root/.cache/huggingface:ro"
 snapshot() {  # <repo id>: its snapshot path in the container, checked on both Sparks
   local id=$1 rev sub
   rev=$(snapshot_rev "$id")
   [[ -n "$rev" ]] || die "$id not in $HF_CACHE: $why download it"
   sub="hub/models--${id//\//--}/snapshots/$rev"
   [[ -f "$HF_CACHE/$sub/config.json" ]] || die "$id @ ${rev:0:8} not in $HF_CACHE: $why download it"
-  worker "test -f '$WORKER_HF/$sub/config.json'" || die "$id @ ${rev:0:8} not on the worker ($WORKER_HF): $why copy it there"
+  if [[ "$WORKER_WEIGHTS" == nfs ]]; then
+    worker_nfs test -f "/hf/$sub/config.json" ||
+      die "the worker does not see $id @ ${rev:0:8} over NFS ($NFS_VOLUME): $why set it up"
+  else
+    worker "test -f '$WORKER_HF/$sub/config.json'" || die "$id @ ${rev:0:8} not on the worker ($WORKER_HF): $why copy it there"
+  fi
   echo "/root/.cache/huggingface/$sub"
 }
 MODEL_ARG=$(snapshot "$MODEL_ID")
@@ -208,7 +217,7 @@ launch() {
   log "Rank 0 here: ${rank0[*]}"
   worker_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}"
               $(nccl_env "$WORKER_DEV" "$WORKER_HCAS" "$WORKER_GID")
-              -v "$WORKER_HF:/root/.cache/huggingface" -v '$HOME/.cache/tensorfold-glm53:/cache'
+              -v "$WORKER_MOUNT" -v '$HOME/.cache/tensorfold-glm53:/cache'
               "$IMAGE" "${rank1[@]}")
   remote=""; for a in "${worker_cmd[@]}"; do
     case "$a" in '$HOME'*) remote+=" \"$a\"" ;; *) remote+=" $(printf '%q' "$a")" ;; esac
@@ -243,7 +252,7 @@ foreground() {
   exit "$code"
 }
 # NVIDIA's container banner, without its license notice (GOVERNING TERMS ...), which stays visible
-NOISE='^\s*$|^=+$|^== PyTorch ==|^NVIDIA Release|Copyright|All rights reserved|PyTorch Version|Various files include|NOTE: CUDA Forward|Using CUDA|cuda-compatibility|Container image|torch/utils/_pytree\.py.*register_constant'
+NOISE='^\s*$|EXL3 support is experimental|^=+$|^== PyTorch ==|^NVIDIA Release|Copyright|All rights reserved|PyTorch Version|Various files include|NOTE: CUDA Forward|Using CUDA|cuda-compatibility|Container image|torch/utils/_pytree\.py.*register_constant'
 LOGS_PID=""
 trap 'kill $LOGS_PID 2>/dev/null || true' EXIT
 # GPU memory a container's processes hold so far (GiB); on the worker through ssh, with this definition

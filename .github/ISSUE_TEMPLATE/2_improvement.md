@@ -25,9 +25,8 @@ assignees: ""
        * a default in scripts/config.sh that is wrong for most people
        * a memory setting that is too conservative or does not fit
        * a patch that no longer applies to a newer TensorFold release
-       * startup time (weights load in ~6 min on each Spark; the first start also
+       * startup time (weights load in 2 to 6 min on each Spark; the first start also
          compiles kernels)
-       * a benchmark in tools/ that measures the wrong thing
 -->
 
 ## Proposed change
@@ -47,7 +46,7 @@ assignees: ""
 
        * prefill tok/s and time to first token at several prompt sizes, and decode
          tok/s for prose, code and edit replies at 1 to 4 concurrent requests,
-         measured with tools/bench.py or sparkDash (https://github.com/MiaAI-Lab/sparkDash)
+         measured with sparkDash (https://github.com/MiaAI-Lab/sparkDash)
        * rank 0's startup estimate from
          `docker logs glm53-flash-tf | grep "startup estimate"`
        * needle retrieval (tools/needle.py) PASS/FAIL

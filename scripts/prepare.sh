@@ -43,7 +43,7 @@ worker 'command -v rsync >/dev/null' || die "rsync is not installed on the worke
 detect_link
 log "Link: head $HEAD_ADDR ($HEAD_DEV, $HEAD_HCA, GID $HEAD_GID) <-> worker $WORKER_ADDR ($WORKER_DEV, $WORKER_HCA, GID $WORKER_GID)"
 WORKER_HF=$(worker_hf_cache)
-worker "mkdir -p '$WORKER_HF/hub' && test -w '$WORKER_HF/hub'" ||
+[[ "$WORKER_WEIGHTS" == nfs ]] || worker "mkdir -p '$WORKER_HF/hub' && test -w '$WORKER_HF/hub'" ||
   die "the worker's $WORKER_HF/hub is not writable (left root-owned by a container? fix its ownership there)"
 
 PATCHES_HASH=$(image_hash)
@@ -158,11 +158,26 @@ done
 # ---------------------------------------------------------------- 5. verify (head)
 # before the copy: the worker gets only a checkpoint TensorFold reads
 log "Verifying checkpoint with tensorfold info"
-docker run --rm --entrypoint tensorfold -e HF_HUB_OFFLINE=1 -v "$HF_CACHE":/root/.cache/huggingface "$IMAGE" \
-  info "/root/.cache/huggingface/hub/models--${MODEL_ID//\//--}/snapshots/$(snapshot_rev "$MODEL_ID")"
+# (without its "EXL3 support is experimental" note: this recipe serves the EXL3 checkpoint on purpose)
+info=$(docker run --rm --entrypoint tensorfold -e HF_HUB_OFFLINE=1 -v "$HF_CACHE":/root/.cache/huggingface "$IMAGE" \
+  info "/root/.cache/huggingface/hub/models--${MODEL_ID//\//--}/snapshots/$(snapshot_rev "$MODEL_ID")" 2>&1) ||
+  die "tensorfold info cannot read the checkpoint: $info"
+printf '%s\n' "$info" | grep -v "EXL3 support is experimental" || true
 
 # ---------------------------------------------------------------- 6. the same files on the worker
+if [[ "$WORKER_WEIGHTS" == nfs ]]; then         # no copy: rank 1 reads the head's cache over NFS
+  ensure_nfs_volume
+  for id in "${models[@]}"; do
+    dir=$(model_cache_dir "$id"); rev=$(snapshot_rev "$id")
+    manifest=$(cd "$dir/snapshots/$rev" && find -L . -type f -printf '%P %s\n' | sort)
+    have=$(worker_nfs find -L "/hf/hub/${dir##*/}/snapshots/$rev" -type f -printf '%P %s\n' 2>/dev/null | sort || true)
+    [[ "$have" == "$manifest" ]] ||
+      die "the worker does not see $id @ ${rev:0:8} over NFS ($NFS_VOLUME: :$NFS_PATH from ${NFS_SERVER:-$HEAD_ADDR}); is HF_CACHE exported to it? (README: Worker weights over NFS)"
+    log "Worker reads $id @ ${rev:0:8} from the head over NFS ($NFS_VOLUME)"
+  done
+fi
 for id in "${models[@]}"; do
+  [[ "$WORKER_WEIGHTS" == nfs ]] && break
   dir=$(model_cache_dir "$id"); rev=$(snapshot_rev "$id")
   # every file of the snapshot, with its size (links followed), as the head has it
   manifest=$(cd "$dir/snapshots/$rev" && find -L . -type f -printf '%P %s\n' | sort)

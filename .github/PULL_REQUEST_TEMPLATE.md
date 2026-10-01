@@ -39,7 +39,8 @@
         site-packages)
       * an actual launch on two Sparks, plus
         `docker logs glm53-flash-tf 2>&1 | grep -E "startup estimate|serving"`
-      * `tools/bench.py`, `tools/needle.py`, `tools/toolcheck.py` against the running server
+      * `tools/needle.py` and `tools/toolcheck.py` against the running server, and
+        sparkDash (https://github.com/MiaAI-Lab/sparkDash) for speed
       * if behavior changed, the measured numbers with the new settings, stating
         which configuration they came from (see README "Performance")
 

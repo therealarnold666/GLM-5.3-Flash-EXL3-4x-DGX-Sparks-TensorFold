@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """A tool call with an array parameter must come back with that argument as a JSON array (typed by the schema).
 
-Usage: tools/toolcheck.py      (API_URL / PORT as in bench.py). Exit code 1 on failure.
+Usage: tools/toolcheck.py      (API_URL / PORT as in client.py). Exit code 1 on failure.
 """
 import json
 import os
 import sys
 import urllib.request
 
-sys.dont_write_bytecode = True           # no tools/__pycache__ from importing bench
-from bench import URL, open_url  # noqa: E402
+sys.dont_write_bytecode = True           # no tools/__pycache__ from importing client
+from client import URL, open_url  # noqa: E402
 TOOLS = [{"type": "function", "function": {
     "name": "add_tags", "description": "Attach tags to a document.",
     "parameters": {"type": "object", "required": ["doc_id", "tags"], "properties": {

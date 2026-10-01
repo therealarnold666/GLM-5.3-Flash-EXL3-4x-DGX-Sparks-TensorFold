@@ -76,7 +76,7 @@ if [[ "$DRAFTER" == dflash2 ]]; then _par=4; else _par=1; fi
 PARALLEL="${PARALLEL:-$_par}"
 # The DSA latent cache and the indexer's pooled keys (patch 0041): fp8 (default) holds them as e4m3 rows with a
 # power-of-two scale each, half bf16's bytes: the 1M-token window with 4 streams fits (rank 0: 88.09 GiB estimated,
-# pool 2,684,928 tokens at the measured start). Lossy: GSM8K 98.0%, HumanEval 97.6%, 1M needle found; drafted replies still equal serial
+# pool 2,852,864 tokens at the measured start). Lossy: GSM8K 98.0%, HumanEval 97.6%, 1M needle found; drafted replies still equal serial
 # ones. bf16: the exact cache (~196k tokens with DFlash2).
 KV="${KV:-fp8}"
 export TF_GLM_KV="$KV"
@@ -165,17 +165,25 @@ export TF_GLM_SHARED_PREFIX="$SHARED_PREFIX"
 # into the memory left at start. TensorFold sizes it from MemAvailable at start minus MEMORY_RESERVE_GIB
 # (TENSORFOLD_MEMORY_RESERVE_GIB), capped at KV_POOL_GIB (its TF_GLM_CACHE_GIB). The server uses about 10 GiB more than
 # its own estimate at its peak (a 1M-token prompt), so the reserve sets the lowest free memory on the head: 14.5 leaves
-# about 4.5 GiB there, and the pool comes out at ~2.1-2.7M tokens depending on what is free at start. TensorFold's own
+# about 4.5 GiB there, and the pool comes out at ~2.1-2.9M tokens depending on what is free at start. TensorFold's own
 # defaults (a tenth of RAM, ~12.2; 3 GiB: pool 1,411,072 tokens) leave ~14 GiB. Raise the reserve if other work
 # shares the Sparks' memory.
 MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-14.5}"
 export TENSORFOLD_MEMORY_RESERVE_GIB="$MEMORY_RESERVE_GIB"
-KV_POOL_GIB="${KV_POOL_GIB:-11}"
+KV_POOL_GIB="${KV_POOL_GIB:-12.5}"
 export TF_GLM_CACHE_GIB="$KV_POOL_GIB"
 
 export TENSORFOLD_NO_UPDATE_CHECK="${TENSORFOLD_NO_UPDATE_CHECK:-1}"
 
 HF_CACHE="${HF_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}}"
+# Where rank 1 reads the checkpoint and DFlash2: copy (default) keeps a copy in the worker's own Hugging Face cache
+# (prepare.sh copies ~166 GiB over the link); nfs reads the head's HF_CACHE over NFS instead (no copy, no disk on the
+# worker), through a read-only docker volume NFS_VOLUME on the worker that prepare.sh creates (no sudo there). The head
+# must export NFS_PATH (default: HF_CACHE) to the worker; NFS_SERVER defaults to the head's address on the link.
+WORKER_WEIGHTS="${WORKER_WEIGHTS:-copy}"
+NFS_PATH="${NFS_PATH:-$HF_CACHE}"
+NFS_SERVER="${NFS_SERVER:-}"
+NFS_VOLUME="${NFS_VOLUME:-glm53-hf}"
 KERNEL_CACHE="${KERNEL_CACHE:-$HOME/.cache/tensorfold-glm53}"   # compiled CUDA kernels (written by the containers)
 STATE_DIR="${STATE_DIR:-$HOME/.local/state/glm53-tensorfold}"   # this recipe's locks and setup marker
 # Free disk prepare.sh asks for before it downloads or copies: the checkpoint (~176 GB) under HF_CACHE (on the worker,
@@ -205,5 +213,5 @@ prepared_state() {
   hash=$(image_hash)
   label=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
   wlabel=$(worker docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
-  echo "model=$MODEL_ID@$MODEL_REVISION drafter=$DRAFTER@$DFLASH2_REVISION image=$label worker=$wlabel patches=$hash worker_host=$WORKER"
+  echo "model=$MODEL_ID@$MODEL_REVISION drafter=$DRAFTER@$DFLASH2_REVISION image=$label worker=$wlabel patches=$hash worker_host=$WORKER weights=$WORKER_WEIGHTS"
 }
