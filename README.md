@@ -1,4 +1,4 @@
-<h1 align="center">GLM-5.3-Flash EXL3 on 2x DGX Spark with TensorFold</h1>
+<h1 align="center">GLM-5.3-Flash EXL3 on DGX Sparks with TensorFold</h1>
 
 <p align="center">
   <sub>by <a href="https://x.com/MiaAI_lab">Mia's AI Lab</a></sub>
