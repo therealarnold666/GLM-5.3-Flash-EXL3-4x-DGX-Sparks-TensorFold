@@ -17,6 +17,13 @@ Every change to this recipe, newest first. Each release names the image it serve
   48 rows: 64 adds ~250 MiB a Spark). For measuring wider windows with 6 to 8 requests at once; past 32 rows raise
   `TF_ROCE_MAX_KB` (1024 for 64) to keep a round's all-gathers on RoCE.
 
+### Fixed
+- **#38: at `PARALLEL=1` a request whose client left kept decoding to `MAX_TOKENS`** (patch `0070-glm-serial-stop`), and
+  every later request waited behind it; stop strings and gate cuts waited the same way. The serial decode loops did
+  not read the request's stop: rank 0's decision now rides on the round's sample all-gather, so both ranks end after
+  the same round. Same replies. `--parallel` above 1 without the DFlash2 drafter is refused at start with the options
+  (DFlash2, `PARALLEL=1`, or no drafts) instead of a confusing message after loading.
+
 ### Changed
 - The README no longer offers the earlier TR3-4bpw checkpoint, and `scripts/config.sh` no longer pins its revision:
   the recipe serves `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`. (Any `MODEL_ID` still works, without a pin.)
