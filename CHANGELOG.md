@@ -5,6 +5,18 @@ Every change to this recipe, newest first. Each release names the image it serve
 
 ## v1.5 (unreleased)
 
+### Added
+- **Up to 8 concurrent requests** (patch `0069-glm-eight-streams`): `PARALLEL` takes 1 to 8 (was 1 to 4; above 1 still
+  needs `DRAFTER=dflash2`); the default stays 4. The batched verify window's segment tables and the segmented kernels'
+  launch grids hold one segment a stream past four (four, as before, up to four streams), and the multi-stream DFlash2
+  drafter, scheduler and startup estimate take 5 to 8 streams. Each stream past the first takes ~210 MiB a Spark at
+  start (~150 MiB at `TP=3`); all of them share the one pool of per-token caches. Replies stay byte-identical to their
+  serial references. Measurements to come.
+- **`TF_GLM_MULTI_WINDOW`** (patch `0069`): the rows of every request's verify window together in a round, 16 to 64 in
+  steps of 8 (default 32, as before), checked to be the same on every rank and counted by the startup estimate (past
+  48 rows: 64 adds ~250 MiB a Spark). For measuring wider windows with 6 to 8 requests at once; past 32 rows raise
+  `TF_ROCE_MAX_KB` (1024 for 64) to keep a round's all-gathers on RoCE.
+
 ### Changed
 - The README no longer offers the earlier TR3-4bpw checkpoint, and `scripts/config.sh` no longer pins its revision:
   the recipe serves `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`. (Any `MODEL_ID` still works, without a pin.)

@@ -93,8 +93,10 @@ export TF_GLM_MTP="${TF_GLM_MTP:-auto}"
 VISION="${VISION:-1}"
 VISION_URLS="${VISION_URLS:-0}"
 # Concurrent requests (patches 0026-0030, 0035, 0040, 0041: one shared pool of per-token caches, one batched verify window
-# a round): 1 to 4, with DRAFTER=dflash2 only (mtp: 1). 4 (default), prose in all (sparkDash): 60.4 / 79.2 / 89.5 /
-# 108.8 tok/s at 1 / 2 / 3 / 4 at once; structured 114.7 / 147.6 / 196.3 / 227.9.
+# a round): 1 to 8 (patch 0069: 5 to 8, measurements to come), with DRAFTER=dflash2 only (mtp: 1). 4 (default), prose
+# in all (sparkDash): 60.4 / 79.2 / 89.5 / 108.8 tok/s at 1 / 2 / 3 / 4 at once; structured 114.7 / 147.6 / 196.3 /
+# 227.9. Each stream past the first takes ~210 MiB a Spark at start (its KDA states, index rings and DFlash2 ring;
+# ~150 MiB with TP=3); every stream shares the one pool of per-token caches, so more streams do not grow it.
 if [[ "$DRAFTER" == dflash2 ]]; then _par=4; else _par=1; fi
 PARALLEL="${PARALLEL:-$_par}"
 # The DSA latent cache and the indexer's pooled keys (patch 0038): fp8 (default) holds them as e4m3 rows with a
@@ -172,6 +174,12 @@ export TF_GLM_WIDE_GRAPHS="$_w" TF_GLM_COPY_REPLY_MATCH="$_w"
 # kept prompts there, so interactive sessions miss the prompt cache and re-read whole histories (issues #12, #13).
 # Off by default until that move keeps them. Exact either way.
 export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-0}"
+# --parallel: rows of every request's verify window together in a round (patch 0069; TensorFold's TF_GLM_MULTI_WINDOW):
+# 32 (default, as before) or 16 to 64 in steps of 8. With more requests at once each one's drafts get fewer of these
+# rows (8 streams at 32: ~3 drafts each); a wider window verifies more of them a round at a higher round cost. Past 48
+# rows the startup estimate grows (64: ~250 MiB a Spark), and past 32 a round's all-gathers exceed TF_ROCE_MAX_KB=512
+# (16 KiB a row) and go through NCCL unless it is raised (1024 for 64). Measurements to come. Exact at any size.
+export TF_GLM_MULTI_WINDOW="${TF_GLM_MULTI_WINDOW:-32}"
 # Kept prompt states (TensorFold's TF_GLM_CACHE_ENTRIES, 8 by default): the oldest is dropped past this count, however
 # much of the pool is free. A drafted agent request keeps 1 to 3 (its own plus shared-prefix states), so 8 let three
 # or four alternating conversations push each other out (issue #17). Each entry reserves its fixed state (~45 MiB) at
