@@ -3,6 +3,157 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.4 (unreleased): image prompts resume, tool calls never dropped, pictures in tool results, earlier reasoning kept, smooth concurrent streaming, 3 Sparks (experimental)
+
+Image: `v0.6.0-5e01f1bb74d8` (`sha256:14f15591eae5d6a540f09218d3852068962fe5381371bbfefe0e9194cd834529`), 68 patches, for two and three Sparks.
+
+### Changed
+- **Earlier turns' reasoning stays in the prompt** (#23, patch `0060-glm-keep-thinking`, by @kky42), as in zai-org's
+  current template. The checkpoint's template dropped it at each new user message, so agents prefilled the previous
+  turn's tool loop again (a replayed agent session: 85,127 -> 16,106 tokens). `TF_GLM_CLEAR_THINKING=1`, or a
+  request's `chat_template_kwargs.clear_thinking: true`, restores the old rendering. Prompts without earlier-turn
+  reasoning render as before.
+- **`chat_template_kwargs.thinking`** (#25, patch `0057-server-thinking-alias`, from @Alexbob0's PR) is read as
+  `enable_thinking` when that is absent: `true` / `false`, or `{"type": "enabled" | "disabled"}`. DeepSeek-V4 clients
+  such as pi send it; it was ignored. Other values (`{"type": "adaptive"}`, a string) leave the server's default, as
+  before, and are logged once; they are never refused.
+
+### Added
+- **Smooth streaming with several requests at once** (patches `0062-glm-sliced-fill` and `0061-server-smooth-stream`;
+  `FILL_BUDGET_MS=200`, `FILL_DRAFTS=1`, `STREAM_SMOOTH=1`, all on by default). Concurrent replies arrived in bursts and
+  froze while another request's prompt filled: each 1,024-row prompt chunk (~0.65 s) stopped every other reply.
+  Now a new prompt's chunks run a few layers at a time (about `FILL_BUDGET_MS` each) with a drafted decode round between
+  slices, and a streamed reply's tokens go out one event each at a steady pace from a 400 ms playout buffer
+  (`STREAM_SMOOTH_MS`). Three replies streaming while a fresh ~25k-token prompt arrives (two boots each): the replies'
+  gaps p50 / p90 / max **630 / 673-690 / 754-818 ms -> 81 / 149-150 / 230-231 ms**, none above 250 ms (75-78
+  before); they received **81 -> 650-662 tokens** during the fill; the new prompt's first token **16.1 -> 21.1-21.3
+  s** (`FILL_DRAFTS=0`: 18.1 s with gaps up to ~250 ms; `FILL_BUDGET_MS=0`: the old behaviour). Without a fill, four
+  replies at once: gaps p50 / p90 **107 / 128 -> 40 / 58 ms**, one reply **50 / 68 -> 16 / 20 ms**; replies end when
+  they did. Replies are byte-identical (22/22 concurrent cases against serial references, drafted == serial, long
+  prompts, the needle); a request alone fills as before. Text appears ~0.4 s later than it is decoded; tool calls keep
+  their place in the stream.
+- **3 Sparks (experimental):** `./start-tp3.sh` (`TP=3`, `COMM=nccl` by default, `roce` allowed), with `WORKER2` for
+  rank 2. Links are found per pair of nodes (a triangle of direct cables); `stop.sh` stops every configured worker;
+  `prepare.sh` prepares every worker. Each rank's container gets `TF_ROCE_HCA`, the RoCE devices its NCCL uses toward
+  its peers (at two Sparks it is not set: the RoCE all-gathers take the same devices from `NCCL_IB_HCA`). The
+  PCIe-twin rail by name (#30) applies at two Sparks only: past two, a node's devices are the ones that share a subnet
+  with a peer, so a twin without an address in such a subnet is not used. Three Sparks ran on v1.3.2's patches and, on
+  2026-10-03, on top of v1.4: exact (concurrent == one at a time 22/22, drafted == serial, sliced fill on == off, the
+  195k needle, cancellation mid-fill), measurements in the README. Two Sparks run as before: the same docker commands
+  and defaults.
+- **The TP-N GLM engine as patches 0066-0068, after 0001-0065:** `0066-glm-tp-n` (the engine on 3 ranks, `--tp 3`:
+  heads, expert columns, vocab and DFlash2 KV groups in whole units, remainder to the lowest ranks; per-subnet RoCE,
+  b12x's proxy modified for more than two Sparks), `0067-glm-tp3-split-pad` (at `TP=3` a 2,048-row prompt chunk pads
+  to 2,049 rows, which the buffers did not hold, so the split prefill never ran: one pad row),
+  `0068-glm-tpn-split-buffer-rows` (the memory estimate counts that row). On v1.4's code: the early split connection
+  (0064, #36) opens one to every peer past two ranks instead of being skipped there, and the rank checks (0065, #29)
+  name the follower's own rank in their errors. Two Sparks: buffers, estimate and connections unchanged.
+- `DRY_RUN=1 ./start.sh` prints every rank's docker command and exits without stopping or starting anything;
+  `DRY_RUN=1 ./stop.sh` says what it would stop on which Spark and stops nothing.
+- **Per-worker settings** for the third Spark, as v1.3.3 / v1.4 do for the one worker: `FABRIC_PEER2`,
+  `WORKER_HF_CACHE2`, `WORKER_WEIGHTS2`, `NFS_SERVER2`; every rank's log saved before its container is removed
+  (`stop.sh`, and `start.sh` for a stopped container left from an earlier run); the image checked by content on every
+  worker (#8); every worker's file list compared in byte order (#21) with only what `rsync` must send counted (#24); a
+  `FABRIC_PEER2` host name resolved as at two Sparks.
+- `KV_POOL_GIB` defaults per `TP`: 12.5 at two Sparks (unchanged), 32 at three (a 1M needle at 27 left rank 0 10.6 GiB
+  at its lowest, so ~5.6 at 32).
+
+### Fixed
+- **#36, `SPLIT=1` failed to start on some Spark pairs** (NCCL `ibv_reg_mr ... Cannot allocate memory` on rank 1):
+  the split's send/receive connection was opened after the cache pool had taken the memory. It now opens before the
+  weights load (patch `0064-glm-split-connect-early`). Same replies.
+- **#29, a stalled server said nothing** (patch `0065-glm-rank-checks`). Not the fix: the cause is not found yet. Each
+  step's message between the ranks now carries a sequence number and a checksum, so ranks that fall out of step stop
+  with an error naming it; `/health` reports `iteration_s`, how long the current step has run; and
+  `TF_GLM_MULTI_WATCHDOG_EXIT=1` makes a server stuck past `TF_GLM_MULTI_WATCHDOG_S` (300 s) exit after printing every
+  thread's stack, so a supervisor can restart it. Same replies.
+- **An agent's tool loop pushed other conversations' kept prompts out** (PR #32 by @Alexbob0, patch
+  `0063-glm-kept-cap-superseded-first`): past `TF_GLM_CACHE_ENTRIES` the least recently used state went, so a
+  conversation taking many short turns dropped the only state of another one waiting on a long reply, whose next turn
+  then read its whole history again. A conversation's earlier states, superseded by its own longer ones, now go first.
+  Same replies.
+- **Downloads without the host `hf` CLI left the Hugging Face cache root-owned** (PR #34 by @100menotu001): the
+  fallback container ran as root, so later `hf` runs, the copy to the worker and cache cleanup failed with Permission
+  denied. It now runs as your user, with the same `hub/` layout.
+- **#11, a prompt with a picture anywhere in it never resumed from a kept state** under `PARALLEL` above 1: every turn
+  of a conversation with pictures in its history read the whole history again (minutes at 100k+ tokens). Kept states
+  are now told apart by each picture's content, and only the pictures past the resume point are encoded again
+  (patch `0054-glm-image-prompt-reuse`, by @abhicnv007, applied as contributed with two review changes). Also
+  reported, with measurements, by @DevRico003, @lukemdanastasi and @d4rkdpg.
+- **#22, a tool call the model ended with its end token before `</tool_call>` was dropped** (`finish_reason: "stop"`,
+  no call, no text). It is now closed and sent as a call when it then parses, else returned as text; a call whose
+  `<arg_key>` the model wrote as whitespace gets it back (patch `0055-glm-open-tool-calls`). A call cut by the token
+  limit is still never sent. Reported by @teamlewis-bot, confirmed by @andrejsstepanovs.
+- **#28, pictures in tool results were refused with HTTP 400** (`image_url parts are supported only in user
+  messages`), which every later request of an agent session replayed. They are now read in place, inside their
+  `<tool_response>`, as the served template renders a tool result's media (patch `0056-glm-tool-result-media`).
+  With `VISION=0` they become the template's own "unable to process this image" reminder, so the session goes on; a
+  picture in a user message still needs `VISION=1` (HTTP 400 that says so). Reported by @d4rkdpg.
+- A POST to an unknown route left its body on the kept-alive connection, so the next request on it failed with 400
+  (TensorFold v0.6.1's fix for #181, commit 50dfe38a, backported: patch `0059-server-refused-bodies`).
+- A client that left was not noticed once the server held more than ~1,000 descriptors, and its reply was decoded for
+  nobody (TensorFold PR #218 by @jayleaton: patch `0058-server-client-gone-poll`).
+
+## v1.3.3 (2026-10-02): our own checkpoint by default, setup fixes, saved server logs, both PCIe links of a QSFP port
+
+Image unchanged: `v0.6.0-ae8d1c789b47`. No patch changes. The default checkpoint changes, so replies differ from v1.3.2
+(with `MODEL_ID=Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw` they are the same as before).
+
+### Changed
+- **Default checkpoint: [`Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold)** (rev `078455ff`), Mia's AI Lab's own EXL3
+  quantization of GLM-5.3-Flash, Apache-2.0. Same format, size (~176 GB), speed and memory as TR3-4bpw. Against TR3-4bpw on
+  the same build: KL divergence to the original model 4-18% lower as served, on every test set (paired 95% intervals
+  exclude zero on 7 of 8); coding equal (HumanEval+ and MBPP+, thinking on: 469 vs 468 of 542, paired p = 1.0) with
+  ~10% shorter replies; GSM8K 247 vs 245 of 250, HumanEval 157 vs 160 of 164 (neither significant). Details on its
+  model card. TR3-4bpw stays pinned and one setting away: `MODEL_ID=Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw`.
+- **Disk:** the first `./start.sh` after updating downloads the new checkpoint (~176 GB) and copies it to the worker.
+  To free TR3's space afterwards, delete `models--Mia-AiLab--GLM-5.3-Flash-EXL3-TR3-4bpw` from the Hugging Face cache
+  on both Sparks (`~/.cache/huggingface/hub` unless `HF_HOME` / `WORKER_HF_CACHE` say otherwise); the recipe never
+  deletes it itself.
+
+### Added
+- **Saved server logs.** `docker rm -f` deletes a container's log, so a crash's log was lost at the next stop or
+  restart. `stop.sh`, and `start.sh` before it removes a stopped container left from an earlier run, now save each
+  rank's log (stdout and stderr, with timestamps), gzipped, as `<date>-<time>-rank<N>.log.gz` in
+  `~/.cache/tensorfold-glm53/logs` on each Spark (`LOG_DIR` on the head), keep the newest 10 of each rank
+  (`LOG_KEEP`; `0` saves none), and print where. A log that cannot be saved only warns.
+- **`WORKER` and `FABRIC_PEER` as host names** (#26): a name (an `/etc/hosts` alias of the CX7 address, a LAN name,
+  mDNS) is resolved to IPv4 before the route lookup, which takes addresses only; before, it stopped with `no route
+  from this node to <name>`. By @Alexbob0.
+- **`WORKER_HF_CACHE`** (#26): the worker's Hugging Face cache when it is not its `HF_HOME` (a shared models folder,
+  say), used by the copy, the checks and rank 1's mount. Unset, nothing changes. By @Alexbob0.
+- **`tools/end_of_turn.py`** (#27): the end-of-turn check behind #18 (8 short French coding prompts, thinking off:
+  replies cut by `max_tokens`, and P(end of turn) right after the closing code fence); exit code 1 above `max_cut`
+  cut replies. By @Alexbob0.
+
+### Changed (setup)
+- **Both PCIe links of the cabled QSFP port** (#30): a Spark's QSFP port reaches the GB10 over two PCIe Gen5 x4
+  links, so it shows up as two netdevs and two RoCE devices ("twins"). The rails scan only took a second device in
+  the link's own subnet, so with the twins in different subnets (NVIDIA's two-Spark playbook) NCCL and the RoCE
+  all-gathers ran on one x4. The twin is now paired by name as well. By @webzone. With a fix of ours: when the twins
+  share the link's subnet (as on our pair), the twin was listed twice (`rocep1s0f1,roceP2p1s0f1,roceP2p1s0f1`); it
+  is listed once. On our pair the devices are unchanged (head `rocep1s0f1,roceP2p1s0f1`, worker
+  `rocep1s0f0,roceP2p1s0f0`, as before). `NCCL_RAILS=1` still uses one device.
+
+### Fixed
+- **#21, the worker copy check failing when the two Sparks sort differently.** The check compared the head's and the
+  worker's `find | sort` manifests as strings, each sorted in its own host's locale (ssh carries none of ours), so
+  identical copies failed after the full copy whenever the locales differed or the launcher set none (systemd, cron,
+  Tailscale SSH). Every manifest is now sorted in byte order (`LC_ALL=C`), inside the commands sent to the worker too,
+  and a mismatch prints the first differing lines. Reported by @alexandrupetraru, reproduced by @ThinkCode.
+- **#24, the disk checks asking for the whole checkpoint when it is already cached.** The head asked for
+  `MIN_FREE_GB` (180 GB) whenever the pinned revision's snapshot was new, even when every blob was in the cache from
+  an earlier revision. It now asks the Hub which files the revisions hold and counts only those whose blob is missing
+  (by name and size), plus 5 GB; that needs `huggingface_hub` on the host (`python3`, or the `hf` CLI's own Python),
+  and without it or the Hub the old rule applies. The worker check counted the whole snapshot; it now counts what
+  `rsync` must send. Reported by @ThinkCode.
+
+### Unchanged
+- The image, the patches and every serving setting besides the checkpoint: memory and speed are those of v1.3.2
+  (except on pairs whose port twins were left out before, #30); with `MODEL_ID=Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw`
+  replies are too.
+- `start.sh`'s help said `TF_GLM_MULTI_LONE` defaults to 1; it has been 0 since v1.3.1 (help text only).
+
 ## v1.3.2 (2026-10-01): more kept prompts, a note on non-English prompts
 
 Image unchanged: `v0.6.0-ae8d1c789b47`.
