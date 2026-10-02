@@ -3,6 +3,12 @@
 Every change to this recipe, newest first. Each release names the image it serves: `scripts/prepare.sh` pulls
 `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold` by the digest pinned in `scripts/config.sh`.
 
+## v1.5 (unreleased)
+
+### Changed
+- The README no longer offers the earlier TR3-4bpw checkpoint, and `scripts/config.sh` no longer pins its revision:
+  the recipe serves `Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`. (Any `MODEL_ID` still works, without a pin.)
+
 ## v1.4 (2026-10-03): image prompts resume, tool calls never dropped, pictures in tool results, earlier reasoning kept, smooth concurrent streaming, 3 Sparks (experimental)
 
 Image: `v0.6.0-5e01f1bb74d8` (`sha256:14f15591eae5d6a540f09218d3852068962fe5381371bbfefe0e9194cd834529`), 68 patches, for two and three Sparks.
