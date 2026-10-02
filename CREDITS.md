@@ -10,7 +10,10 @@ checkpoint's ShapleyMcg attribution and the drafter's license).
 - **[GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash)** by [Z.ai](https://huggingface.co/zai-org): the
   model's design, training and evaluations. Its license, on the model card, governs any use of the weights. The
   weights are not part of this repository; `scripts/prepare.sh` downloads them from Hugging Face.
-- **[brandonmusic](https://huggingface.co/brandonmusic)**: the EXL3 4-bit quantization,
+- **Mia's AI Lab**: the default checkpoint since v1.3.3, [`Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold) (Apache-2.0), made with
+  [exllamav3](https://github.com/turboderp-org/exllamav3) by turboderp (MIT).
+- **[brandonmusic](https://huggingface.co/brandonmusic)**: the default checkpoint before v1.3.3, still selectable
+  with `MODEL_ID`: the EXL3 4-bit quantization,
   [`brandonmusic/GLM-5.3-Flash-tr3-4bpw`](https://huggingface.co/brandonmusic/GLM-5.3-Flash-tr3-4bpw), served here
   from its mirror [`Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw`](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw)
   (a byte-identical copy), made with **ShapleyMcg** by Brandon M.
@@ -46,7 +49,8 @@ checkpoint's ShapleyMcg attribution and the drafter's license).
   (Apache 2.0), the reference they follow; builds on TensorFold's Qwen image pipeline.
 - `0006-cuda-roce-allgather`: the one-shot RoCE all-gather (`COMM=roce`) is the "RoCEnante" transport of
   **[b12x](https://github.com/local-inference-lab/b12x)** by local-inference-lab (Apache 2.0): its C proxy
-  (`roce_proxy.c`) used as is, its CuTe all-gather kernel reimplemented in CUDA C++ (`roce.cu`).
+  (`roce_proxy.c`), modified for more than two Sparks (per-peer routes over up to 4 network cards; its header lists the
+  changes), and its CuTe all-gather kernel reimplemented in CUDA C++ (`roce.cu`).
 - `0012-glm-kda-chunked`, `0014-glm-kda-chunked-gb10`, `0039-glm-kda-chunked-kernel` (`KDA_CHUNKED`, on by default):
   the chunked WY / UT form of the delta-rule recurrence follows the published chunkwise algorithm of gated delta
   networks and Kimi Delta Attention, as implemented in
@@ -75,6 +79,17 @@ checkpoint's ShapleyMcg attribution and the drafter's license).
 - `0047-glm-exl3-decode-loads` (routed-expert decode loads, `TF_GLM_EXL3_LOADS`): adapted from patch 0580 of
   [jayleaton/glm53-tensorfold-spark](https://github.com/jayleaton/glm53-tensorfold-spark) (Apache 2.0); changes listed
   in `NOTICE`.
+- `0054-glm-image-prompt-reuse` (image prompts resume from kept prompt states, issue #11): by
+  [abhicnv007](https://github.com/abhicnv007), applied as contributed, with two small review changes.
+- `0057-server-thinking-alias` (`chat_template_kwargs.thinking`): from [Alexbob0](https://github.com/Alexbob0)'s
+  pull request #25; the `{"type": ...}` forms and the refusal of other values were added here.
+- `0058-server-client-gone-poll`: [TensorFold PR #218](https://github.com/ashhart/TensorFold/pull/218) by
+  [jayleaton](https://github.com/jayleaton) (Apache 2.0), applied unchanged: the client-gone check sees descriptors
+  past 1023.
+- `0059-server-refused-bodies`: TensorFold v0.6.1's fix for #181 (commit 50dfe38a, by
+  [SxMShaDoW](https://github.com/SxMShaDoW)), backported to v0.6.0.
+- `0060-glm-keep-thinking` (earlier turns keep their reasoning, `TF_GLM_CLEAR_THINKING`): by
+  [kky42](https://github.com/kky42), pull request #23.
 - Every patch, except the parts credited above: by MiaAI-Lab, developed with
   [Claude Code](https://claude.com/claude-code), under the Apache License 2.0; the TensorFold code the patches modify or
   quote as context stays under TensorFold's licenses (Apache 2.0, and MIT for code written before v0.6.0; see

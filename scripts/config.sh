@@ -26,17 +26,38 @@ if [[ -f "$_cfg_root/.env" ]]; then
 fi
 unset _n _line _key _value
 
-# The two Sparks: this machine serves rank 0 and the API; WORKER (ssh target, key-based) runs rank 1.
+# The Sparks: this machine serves rank 0 and the API; WORKER (ssh target, key-based) runs rank 1. TP: how many Sparks
+# (2, the default; 3 through ./start-tp3.sh, experimental: README "3 Sparks"), with WORKER2 (rank 2); a start uses
+# WORKER .. WORKER<TP-1> and leaves later ones out (stop.sh stops every configured one).
+TP="${TP:-2}"
 WORKER="${WORKER:-}"                 # e.g. user@<worker address>; set it in scripts/local.sh
 FABRIC_PEER="${FABRIC_PEER:-}"       # the worker's CX7 address when WORKER is reached over another network
+WORKER_HF_CACHE="${WORKER_HF_CACHE:-}"  # the worker's Hugging Face cache when it is not its HF_HOME (absolute path)
+WORKER2="${WORKER2:-}"; FABRIC_PEER2="${FABRIC_PEER2:-}"; WORKER_HF_CACHE2="${WORKER_HF_CACHE2:-}"   # rank 2, as WORKER / FABRIC_PEER / WORKER_HF_CACHE
 MASTER_PORT="${MASTER_PORT:-29551}"  # TensorFold's rendezvous port between the ranks (keep it on the private link)
+# The rendezvous address (rank 0's, --master): at TP=2 the head's address on the link to the worker; at TP>2 this
+# node's LAN address (what its hostname resolves to), which every worker reaches. SOCKET_IFNAME (TP>2): the netdev of
+# NCCL's bootstrap socket on every node (default: each node's default-route netdev).
+_ma=""
+if [[ "$TP" != 2 ]]; then
+  # (|| true: a hostname that does not resolve fails getent, and under pipefail that ended the script silently)
+  _ma=$(getent ahostsv4 "$(hostname)" 2>/dev/null | awk '$1 !~ /^127\./ {print $1; exit}' || true)
+  [[ -n "$_ma" ]] || _ma=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+fi
+MASTER_ADDR="${MASTER_ADDR:-$_ma}"
+SOCKET_IFNAME="${SOCKET_IFNAME:-}"
 
-MODEL_ID="${MODEL_ID:-Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw}"   # EXL3 routed experts (4 bpw), BF16 elsewhere
+MODEL_ID="${MODEL_ID:-Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold}"   # EXL3 routed experts (4 bpw), BF16 elsewhere
+# (Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw, the default before v1.3.3, still works: MODEL_ID=... in scripts/local.sh)
 # The checkpoint's revision (a Hugging Face commit sha; DFLASH2_REVISION below is DFlash2's): the one this recipe was
 # measured with. prepare.sh downloads exactly it, start.sh serves that snapshot from the local cache (no network), and
 # a new upstream commit changes nothing here until the pin does. Empty: the Hub's main when first downloaded. The pin
-# belongs to the default MODEL_ID; another MODEL_ID gets no pin unless you set one.
-_rev=""; [[ "$MODEL_ID" == Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw ]] && _rev=9eaebb7c4e96d983dcd538e18624622ba5b820a8
+# belongs to the two checkpoints above; another MODEL_ID gets no pin unless you set one.
+case "$MODEL_ID" in
+  Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold) _rev=078455ffe6472f9a52fbc1139f58b9db2881b25c ;;
+  Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw) _rev=9eaebb7c4e96d983dcd538e18624622ba5b820a8 ;;
+  *) _rev="" ;;
+esac
 MODEL_REVISION="${MODEL_REVISION-$_rev}"
 TF_VERSION="${TF_VERSION:-v0.6.0}"
 TF_REPO="${TF_REPO:-https://github.com/ashhart/TensorFold.git}"
@@ -50,8 +71,9 @@ GHCR_IMAGE="${GHCR_IMAGE:-ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-ten
 # The published image of this release's patches, pinned: prepare.sh pulls it by digest (a tag can be moved, a digest
 # cannot) while patches/*.patch and IMAGE_EXTRAS still hash to IMAGE_TAG's hash. Other patches pull
 # $GHCR_IMAGE:<TF_VERSION>-<hash> when one is published, else build locally. scripts/publish-image.sh prints both.
-IMAGE_TAG="${IMAGE_TAG:-v0.6.0-ae8d1c789b47}"
-IMAGE_DIGEST="${IMAGE_DIGEST:-sha256:22789f0cb3dc308f0b2ce52a33961b88bd624af1725e91e8aba0a74a671bb969}"
+# The same image serves two and three Sparks.
+IMAGE_TAG="${IMAGE_TAG:-v0.6.0-5e01f1bb74d8}"
+IMAGE_DIGEST="${IMAGE_DIGEST:-sha256:14f15591eae5d6a540f09218d3852068962fe5381371bbfefe0e9194cd834529}"
 # the registry reference prepare.sh pulls for these patches: the pinned digest, or the hash's tag
 prebuilt_image() {
   local tag="${TF_VERSION}-$(image_hash)"
@@ -109,7 +131,8 @@ export TF_GLM_DENSE="$DENSE"
 # The ranks' all-gathers. roce (default): the small ones (a decode round's partials, the samplers; up to
 # TF_ROCE_MAX_KB below) as one-shot RDMA writes over the Sparks' RoCE link, b12x's transport (patch 0006): 11 us a
 # 16 KiB gather against NCCL's 45; decode +6% (prose 44.2 -> 46.9, code 48.7 -> 51.6). NCCL keeps the rest. nccl: NCCL
-# for all. Same bits.
+# for all. Same bits. start-tp3.sh defaults to nccl; with roce there, each peer goes over the devices that share its
+# subnet (the TP-N engine's RoCE; TF_ROCE_HCA lists them all, the GID is found per device).
 COMM="${COMM:-roce}"
 export TF_GLM_COMM="$COMM"
 # The largest all-gather in KiB that goes over RoCE (patch 0006 reads it; a setting, no patch of its own): 512 (default;
@@ -156,12 +179,30 @@ export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-0}"
 # or four alternating conversations push each other out (issue #17). Each entry reserves its fixed state (~45 MiB) at
 # start: 32 takes ~1 GiB more than 8.
 export TF_GLM_CACHE_ENTRIES="${TF_GLM_CACHE_ENTRIES:-32}"
+# Earlier turns keep their reasoning in the prompt (patch 0060), as in zai-org's current template. 1: drop it, as the
+# checkpoint's template does; agents then prefill the previous turn's tool loop again at each new user message.
+export TF_GLM_CLEAR_THINKING="${TF_GLM_CLEAR_THINKING:-0}"
 # Waiting prompts filled together in one forward (patch 0049): shared work (expert weights, glue, projections) runs once
 # for every waiting prompt, attention per prompt on its own state, so each gets the bits it gets alone. sparkDash, prose at
 # 4 at once: 103.4 -> 108.8 tok/s, time to first token 590 -> 340 ms; structured at 3 / 4 at once: 175.2 -> 196.3 and
 # 196.3 -> 227.9 tok/s; one request unchanged. Exact. MULTI_PREFILL=0 turns it off.
 MULTI_PREFILL="${MULTI_PREFILL:-1}"
 export TF_GLM_MULTI_PREFILL="$MULTI_PREFILL"
+# Smooth streaming (patch 0061): with drafts a round accepts ~3 tokens at once, so a streamed reply arrives in bursts
+# (every ~50 ms alone, ~100 ms with 4 streams), and pauses while another request's prompt fills. 1 (default): tokens
+# go out one event each at a steady pace from a playout buffer of STREAM_SMOOTH_MS (text appears that much later; the
+# reply still ends when it did); the same text, tool calls in place. 0: one event a round, as soon as it is decoded.
+STREAM_SMOOTH="${STREAM_SMOOTH:-1}"
+STREAM_SMOOTH_MS="${STREAM_SMOOTH_MS:-400}"
+export TF_GLM_STREAM_SMOOTH="$STREAM_SMOOTH" TF_GLM_STREAM_SMOOTH_MS="$STREAM_SMOOTH_MS"
+# Concurrent prompt fills in layer slices (patch 0062): while other requests decode, a new prompt's 1,024-row chunks
+# run a few layers at a time (about FILL_BUDGET_MS each) with a decode round between slices, instead of freezing the
+# other replies for a whole chunk. FILL_DRAFTS=1 (default): those rounds draft as usual (~3 tokens a stream);
+# 0: one token a stream (the new prompt's first token sooner, the others slower while it fills). FILL_BUDGET_MS=0:
+# whole chunks, as before. A request alone fills at full speed either way. Same replies.
+FILL_BUDGET_MS="${FILL_BUDGET_MS:-200}"
+FILL_DRAFTS="${FILL_DRAFTS:-1}"
+export TF_GLM_FILL_BUDGET_MS="$FILL_BUDGET_MS" TF_GLM_FILL_DRAFTS="$FILL_DRAFTS"
 # L2 prefetch in decode windows (patch 0046, adapted from jayleaton/glm53-tensorfold-spark's patch 0460): a side stream
 # brings the weights the next kernels read into L2 during each layer's all-gathers. 1 (default): one request's prose
 # 48.36 -> 49.46 tok/s, code 59.54 -> 61.08 (two boots each). Same bits. 0: off.
@@ -184,7 +225,11 @@ export TF_GLM_SHARED_PREFIX="$SHARED_PREFIX"
 # the Sparks' memory.
 MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-14.5}"
 export TENSORFOLD_MEMORY_RESERVE_GIB="$MEMORY_RESERVE_GIB"
-KV_POOL_GIB="${KV_POOL_GIB:-12.5}"
+# With more Sparks each holds fewer weights, so the pool can take more (the per-token KV cost is the same on every
+# rank: the latent cache is replicated). TP=3: 32 GiB leaves rank 0, the busiest, ~5 GiB under a 1M-token prompt
+# (at 27: 10.6 GiB lowest on rank 0, pool 5,257,216 tokens; at 32: 5,959,680).
+case "$TP" in 3) _pool=32 ;; *) _pool=12.5 ;; esac
+KV_POOL_GIB="${KV_POOL_GIB:-$_pool}"
 export TF_GLM_CACHE_GIB="$KV_POOL_GIB"
 
 export TENSORFOLD_NO_UPDATE_CHECK="${TENSORFOLD_NO_UPDATE_CHECK:-1}"
@@ -197,12 +242,23 @@ HF_CACHE="${HF_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}}"
 WORKER_WEIGHTS="${WORKER_WEIGHTS:-copy}"
 NFS_PATH="${NFS_PATH:-$HF_CACHE}"
 NFS_SERVER="${NFS_SERVER:-}"
+# The third Spark (TP=3): WORKER_WEIGHTS2 (default: WORKER_WEIGHTS) and NFS_SERVER2 (default: the head's address on
+# that worker's link); NFS_PATH and NFS_VOLUME are the same for all.
+WORKER_WEIGHTS2="${WORKER_WEIGHTS2:-}"; NFS_SERVER2="${NFS_SERVER2:-}"
 NFS_VOLUME="${NFS_VOLUME:-glm53-hf}"
 KERNEL_CACHE="${KERNEL_CACHE:-$HOME/.cache/tensorfold-glm53}"   # compiled CUDA kernels, a folder per image's patches hash
 STATE_DIR="${STATE_DIR:-$HOME/.local/state/glm53-tensorfold}"   # this recipe's locks and setup marker
-# Free disk prepare.sh asks for before it downloads or copies: the checkpoint (~176 GB) under HF_CACHE (on the worker,
-# the copy is checked against its size instead), and an image build or copy (~25 GB) under Docker's root on each Spark;
-# both together when they share a filesystem.
+# Server logs: stop.sh (and start.sh, before it removes a stopped container left from an earlier run) saves each rank's
+# container log, stdout and stderr with timestamps, gzipped, as <date>-<time>-rank<N>.log.gz in LOG_DIR here and in
+# ~/.cache/tensorfold-glm53/logs on each worker, and keeps the newest LOG_KEEP (0: saves none). docker rm deletes a
+# container's own log, so without this a crash's log is gone at the next stop or start.
+LOG_DIR="${LOG_DIR:-$HOME/.cache/tensorfold-glm53/logs}"
+LOG_KEEP="${LOG_KEEP:-10}"
+# Free disk prepare.sh asks for before it downloads or copies: under HF_CACHE, what the download still needs (the
+# revisions' files whose blobs are not cached yet, from the Hub's file list, plus 5 GB), or MIN_FREE_GB for the
+# checkpoint (~176 GB) when that list cannot be read (no huggingface_hub on the host, or no network); on each worker,
+# what rsync must send plus 5 GB; and an image build or copy (~25 GB) under Docker's root on each Spark; both together
+# when they share a filesystem.
 MIN_FREE_GB="${MIN_FREE_GB:-180}"
 IMAGE_FREE_GB="${IMAGE_FREE_GB:-35}"
 
@@ -218,14 +274,20 @@ model_revision() { if [[ "$1" == "$MODEL_ID" ]]; then echo "$MODEL_REVISION"; el
 # snapshot_rev <id>: the snapshot this setup serves: the pin, else what refs/main names on this Spark
 snapshot_rev() { local rev; rev=$(model_revision "$1"); [[ -n "$rev" ]] || rev=$(cat "$(model_cache_dir "$1")/refs/main" 2>/dev/null); echo "$rev"; }
 
-# What scripts/prepare.sh last left ready on both Sparks (it writes this line to PREPARED_MARKER when it succeeds);
-# start.sh runs prepare.sh again whenever the current line differs: a missing or different image on either Spark, new
-# patches, another model, drafter or revision, another worker. Needs scripts/nodes.sh (the worker's image).
+# What scripts/prepare.sh last left ready on every Spark (it writes this line to PREPARED_MARKER when it succeeds);
+# start.sh runs prepare.sh again whenever the current line differs: a missing or different image on any Spark, new
+# patches, another model, drafter or revision, other workers. Needs scripts/nodes.sh (the workers' images). At TP=2 the
+# line is the one it always was.
 PREPARED_MARKER="$STATE_DIR/prepared"
 prepared_state() {
-  local hash label wlabel
+  local hash label wlabel i line
   hash=$(image_hash)
   label=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
-  wlabel=$(worker docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
-  echo "model=$MODEL_ID@$MODEL_REVISION drafter=$DRAFTER@$DFLASH2_REVISION image=$label worker=$wlabel patches=$hash worker_host=$WORKER weights=$WORKER_WEIGHTS"
+  wlabel=$(worker 1 docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
+  line="model=$MODEL_ID@$MODEL_REVISION drafter=$DRAFTER@$DFLASH2_REVISION image=$label worker=$wlabel patches=$hash worker_host=$WORKER weights=$WORKER_WEIGHTS"
+  for (( i = 2; i < TP; i++ )); do
+    wlabel=$(worker "$i" docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo missing)
+    line+=" worker$i=$wlabel worker${i}_host=$(worker_host "$i") weights$i=$(worker_weights "$i") nfs$i=$(wval NFS_SERVER "$i")"
+  done
+  echo "$line"
 }
