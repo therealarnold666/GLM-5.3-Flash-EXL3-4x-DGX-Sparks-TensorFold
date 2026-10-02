@@ -274,7 +274,8 @@ sets a value wins: the environment, then `scripts/local.sh`, then `.env`, then t
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `WORKER` / `FABRIC_PEER` | empty | the worker's ssh target (`user@<address>`), and its CX7 address when `WORKER` is on another network |
+| `WORKER` / `FABRIC_PEER` | empty | the worker's ssh target (`user@<address>` or `user@<host name>`), and its CX7 address when `WORKER` is on another network |
+| `WORKER_HF_CACHE` | the worker's `HF_HOME` | the worker's Hugging Face cache, when it is not its `HF_HOME` (e.g. a shared models folder) |
 | `MASTER_PORT` | `29551` | the ranks' rendezvous port (keep it on the private link) |
 | `PARALLEL` | `4` (`1` with `DRAFTER=mtp`) | requests decoded together, 1 to 4 (above 1 needs `DRAFTER=dflash2`) |
 | `CONTEXT` | `1048576` | prompt + reply window per request (with `KV=fp8`; other defaults in [KV pool and memory](#kv-pool-and-memory)); `0`: the largest that fits |
