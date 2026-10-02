@@ -77,8 +77,11 @@ of 11 sent in a burst).
 - **Two DGX Sparks** (or two GB10 systems with 128 GB unified memory), with nothing else large on their GPUs: each
   needs ~110 GiB free memory when the server starts (`start.sh` warns below that; stop other GPU work).
 - **A direct ConnectX-7 link:** a QSFP cable between the CX7 ports and an IPv4 address on each end in one private
-  subnet (e.g. `192.0.2.1/24` and `192.0.2.2/24`; `ping` must work), with a RoCE v2 GID (`start.sh` checks). With
-  both ports cabled and addressed, both are used (a prompt chunk's all-gather is ~1.8x faster on two rails).
+  subnet (e.g. `192.0.2.1/24` and `192.0.2.2/24`; `ping` must work), with a RoCE v2 GID (`start.sh` checks). One QSFP
+  port of a Spark reaches the GB10 over two PCIe Gen5 x4 links, so it appears as two netdevs and two RoCE devices
+  (`enp1s0f0np0` / `enP2p1s0f0np0`, `rocep1s0f0` / `roceP2p1s0f0`), and the two twins need **different** subnets - that
+  is what NVIDIA's own two-Spark playbook does. Both twins of the cabled port are then used, as is a second cabled
+  port: a prompt chunk's all-gather is ~1.8x faster on two rails, and one rail is one x4 (~112 Gb/s of the port's 200).
 - **Key-based ssh** from the first Spark (the head, which runs `./start.sh` and the API) to the second (the worker):
   `ssh-copy-id user@<worker>` (after `ssh-keygen -t ed25519` if you have no key); check with
   `ssh -o BatchMode=yes user@<worker> true`.
@@ -318,8 +321,8 @@ changes nothing until the pin does. Set one empty to take the Hub's `main` when 
 Less common settings are described in `scripts/config.sh` and `scripts/nodes.sh`: `MODEL_ID`, `DFLASH2_ID`,
 `TF_VERSION`, `TF_REPO`, `BASE_IMAGE` (the patches are made for TensorFold v0.6.0; after changing any of these run
 `scripts/prepare.sh --rebuild`), `IMAGE`, `CONTAINER_NAME`, `GHCR_IMAGE`, `HF_CACHE` (default `$HF_HOME` or
-`~/.cache/huggingface`), `KERNEL_CACHE`, `STATE_DIR`, `MIN_FREE_GB`, `IMAGE_FREE_GB`, `NCCL_RAILS` (`1`: one CX7
-port even when both are up), `NCCL_CHANNELS` (4), `NCCL_DEBUG`, `RSYNC_OPTS`. `start.sh` also takes `HF_HUB_OFFLINE=0` (let the
+`~/.cache/huggingface`), `KERNEL_CACHE`, `STATE_DIR`, `MIN_FREE_GB`, `IMAGE_FREE_GB`, `NCCL_RAILS` (`1`: one RoCE
+port even when the cabled port's two PCIe links, or a second port, are up), `NCCL_CHANNELS` (4), `NCCL_DEBUG`, `RSYNC_OPTS`. `start.sh` also takes `HF_HUB_OFFLINE=0` (let the
 server reach Hugging Face; by default it serves from the local cache only).
 
 ### Thinking and sampling
