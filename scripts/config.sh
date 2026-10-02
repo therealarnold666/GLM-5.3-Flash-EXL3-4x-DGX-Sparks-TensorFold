@@ -48,14 +48,12 @@ MASTER_ADDR="${MASTER_ADDR:-$_ma}"
 SOCKET_IFNAME="${SOCKET_IFNAME:-}"
 
 MODEL_ID="${MODEL_ID:-Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold}"   # EXL3 routed experts (4 bpw), BF16 elsewhere
-# (Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw, the default before v1.3.3, still works: MODEL_ID=... in scripts/local.sh)
 # The checkpoint's revision (a Hugging Face commit sha; DFLASH2_REVISION below is DFlash2's): the one this recipe was
 # measured with. prepare.sh downloads exactly it, start.sh serves that snapshot from the local cache (no network), and
 # a new upstream commit changes nothing here until the pin does. Empty: the Hub's main when first downloaded. The pin
-# belongs to the two checkpoints above; another MODEL_ID gets no pin unless you set one.
+# belongs to the checkpoint above; another MODEL_ID gets no pin unless you set one.
 case "$MODEL_ID" in
   Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold) _rev=078455ffe6472f9a52fbc1139f58b9db2881b25c ;;
-  Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw) _rev=9eaebb7c4e96d983dcd538e18624622ba5b820a8 ;;
   *) _rev="" ;;
 esac
 MODEL_REVISION="${MODEL_REVISION-$_rev}"

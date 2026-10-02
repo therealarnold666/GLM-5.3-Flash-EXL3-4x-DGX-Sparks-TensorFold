@@ -19,9 +19,8 @@ faster prompt kernels, a one-shot RoCE all-gather between the Sparks, several re
 vision, tool calling, `/tokenize` and `/metrics`.
 
 - Checkpoint: [`Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold), Mia's AI Lab's own EXL3 quantization (routed experts at 4 bits a weight,
-  BF16 elsewhere, ~176 GB): closer to the original model than the earlier default TR3-4bpw on every test set, equal in
-  coding, same speed and memory ([model card](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold)). TR3-4bpw stays one setting away:
-  `MODEL_ID=Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw`
+  BF16 elsewhere, ~176 GB), calibrated for how TensorFold serves it
+  ([model card](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold))
 - Drafter: [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), or the checkpoint's
   own MTP head (`DRAFTER`, see [Configuration](#configuration))
 - API model id: `GLM-5.3-Flash-EXL3`
@@ -66,17 +65,15 @@ of 11 sent in a burst).
 | An identical 64k-token prompt, sent again | 34 s | under 0.07 s |
 | A new conversation with the same 7.9k-token system prompt | 4.24 s | 0.13 s |
 
-**Quality** (FP8 KV cache and 4-bit dense weights, see [Checks](#checks); both checkpoints on the same build)
+**Quality** (FP8 KV cache and 4-bit dense weights, see [Checks](#checks))
 
-| Benchmark | This checkpoint | TR3-4bpw (before v1.3.3) |
-| --- | ---: | ---: |
-| GSM8K (250 problems, thinking off) | 98.8% | 98.0% |
-| HumanEval (164 problems, thinking off) | 95.7% | 97.6% |
-| HumanEval+ and MBPP+ (542 problems, thinking on) | 86.5% | 86.3% |
+| Benchmark | Score |
+| --- | ---: |
+| GSM8K (250 problems, thinking off) | 98.8% |
+| HumanEval (164 problems, thinking off) | 95.7% |
+| HumanEval+ and MBPP+ (542 problems, thinking on) | 86.5% |
 
-None of the gaps is statistically significant (paired tests); the new checkpoint's gain is in fidelity to the
-original model (KL divergence 4-18% lower as served) and ~10% shorter replies. Details on the
-[model card](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold).
+Details on the [model card](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold).
 
 ## Requirements
 
@@ -564,15 +561,6 @@ in [`CREDITS.md`](CREDITS.md). The model
 files are downloaded from Hugging Face and are not part of this repository:
 
 - **The checkpoint** [`Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold`](https://huggingface.co/Mia-AiLab/GLM-5.3-Flash-EXL3-4bpw-TensorFold) is under the Apache License 2.0; the base model it derives from is MIT-licensed by Z.AI.
-- **TR3-4bpw** (`MODEL_ID=Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw`, the default before v1.3.3) is under the ShapleyMcg
-  License 1.0, an attribution-required license; its model card and `LICENSE` file have the terms. Its attribution
-  notice:
-
-  > This work includes or was produced using ShapleyMcg, created by Brandon M. Music
-  > (https://github.com/brandonmmusic-max/shapleymcg). ShapleyMcg is licensed under the ShapleyMcg License v1.0, an
-  > attribution-required license that grants no rights to the person known as "0xSero." Use of ShapleyMcg without
-  > this attribution is unlicensed.
-
 - **The base model** [GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) is under the license on its model
   card.
 - **The DFlash2 drafter** is under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/),
@@ -590,7 +578,7 @@ repository's own work only.
 
 Built on [TensorFold](https://github.com/ashhart/TensorFold) by Ash Hart ([ashhart](https://github.com/ashhart)),
 [GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) by Z.ai, the EXL3 format and converter (exllamav3) by
-turboderp, the earlier TR3 quantization by [Brandon M. Music](https://huggingface.co/brandonmusic) (ShapleyMcg), the
+turboderp, the
 DFlash2 drafter by
 [IncoAI](https://huggingface.co/incoai), b12x's RoCE transport by local-inference-lab, and code from
 [glm53-tensorfold-spark](https://github.com/jayleaton/glm53-tensorfold-spark) by Jay Leaton (tool calling, L2 prefetch,
