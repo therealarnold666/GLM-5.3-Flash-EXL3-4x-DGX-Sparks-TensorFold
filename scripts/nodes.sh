@@ -6,7 +6,10 @@ worker() { ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15 "
 
 # The worker's Hugging Face cache: its own HF_HOME, else ~/.cache/huggingface there. prepare.sh copies the checkpoint
 # into it and start.sh mounts it into rank 1.
-worker_hf_cache() { worker 'echo "${HF_HOME:-$HOME/.cache/huggingface}"'; }
+worker_hf_cache() {    # WORKER_HF_CACHE wins: a worker whose cache is not its HF_HOME (e.g. a shared models disk)
+  if [[ -n "${WORKER_HF_CACHE:-}" ]]; then echo "$WORKER_HF_CACHE"; return; fi
+  worker 'echo "${HF_HOME:-$HOME/.cache/huggingface}"'
+}
 
 # An image's identity by content (its layers' diffIDs and runtime config), the same under Docker's overlay2 and
 # containerd image stores: .Id is the config digest under one and the manifest digest under the other, so it never
@@ -102,6 +105,11 @@ cx7_peer() {
 }
 detect_link() {
   local peer=${FABRIC_PEER:-${WORKER#*@}} cx7
+  # a host name (an /etc/hosts alias of the CX7 address, say) is resolved first: ``ip route get`` takes addresses only
+  if [[ ! "$peer" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+    peer=$(getent ahostsv4 "$peer" | awk 'NR == 1 {print $1}') || true
+    [[ -n "$peer" ]] || die "cannot resolve ${FABRIC_PEER:-${WORKER#*@}} to an IPv4 address"
+  fi
   read -r HEAD_ADDR HEAD_DEV HEAD_HCA HEAD_GID <<<"$(link_info "$peer")" || true
   [[ -n "${HEAD_ADDR:-}" ]] || die "no route from this node to $peer"
   # WORKER given by a LAN address (the route goes out a port without RoCE): use the worker's CX7 address instead
