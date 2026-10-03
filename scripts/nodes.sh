@@ -57,6 +57,7 @@ gpu_containers() {
     requests=$(docker inspect -f '{{json .HostConfig.DeviceRequests}}' "$c" 2>/dev/null || true)
     [[ "$requests" == *'"gpu"'* || "$requests" == *'"nvidia"'* ]] && echo "$c"
   done < <(docker ps --format '{{.Names}}')
+  return 0
 }
 check_ring_gpu_exclusive() {
   [[ "$TOPOLOGY" == switchless-ring ]] || return 0

@@ -66,6 +66,9 @@ check_workers
 [[ "$MAX_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "MAX_TOKENS is a token count, not $MAX_TOKENS"
 [[ "$DRAFTER" == dflash2 || "$PARALLEL" == 1 ]] || die "PARALLEL=$PARALLEL needs DRAFTER=dflash2 (mtp serves one request at a time: PARALLEL=1)"
 for v in SPLIT SHARED_PREFIX KDA_CHUNKED COPY_CODE MULTI_PREFILL STREAM_SMOOTH; do [[ "${!v}" =~ ^[01]$ ]] || die "$v is 0 or 1, not ${!v}"; done
+if [[ "$TOPOLOGY" == switchless-ring && "$SPLIT" == 1 && "${TF_GLM_HC_EXCHANGE:-p2p}" != gather ]]; then
+  die 'SPLIT=1 on a switchless ring needs TF_GLM_HC_EXCHANGE=gather; direct P2P cannot cross the missing diagonals'
+fi
 [[ "$WORKER_WEIGHTS" == copy || "$WORKER_WEIGHTS" == nfs ]] || die "WORKER_WEIGHTS is copy or nfs, not $WORKER_WEIGHTS"
 DRY=0; [[ "${DRY_RUN:-0}" == 1 ]] && DRY=1
 [[ "$KV_POOL_GIB" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "KV_POOL_GIB is a number of GiB, not $KV_POOL_GIB"
@@ -293,8 +296,11 @@ fi
 ENV_ARGS=(-e HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}")
 _skip='^$'; (( TP == 2 )) || _skip='^TF_ROCE_HCA='
 while IFS='=' read -r name _; do ENV_ARGS+=(-e "$name=${!name}"); done < <(env | grep -E '^(TENSORFOLD|TF_GLM|TF_ROCE)_[A-Z0-9_]+=' | grep -v "$_skip" || true)
-RUN_ARGS=(--gpus all --ipc=host --network host --shm-size 16g --device /dev/infiniband --cap-add IPC_LOCK
+RUN_ARGS=(--entrypoint /usr/bin/env --gpus all --ipc=host --network host --shm-size 16g --device /dev/infiniband --cap-add IPC_LOCK
           --ulimit memlock=-1 --ulimit stack=67108864)
+# Some CUDA base images omit development headers (notably cusparse.h). A site can mount a matching host toolkit's
+# headers on every rank. Mount the complete tree so nvcc and its crt headers remain from the same CUDA release.
+[[ -z "${CUDA_HOST_INCLUDE:-}" ]] || RUN_ARGS+=(-v "$CUDA_HOST_INCLUDE:/usr/local/cuda/include:ro")
 
 # ---------------------------------------------------------------- 3. launch, 4. load (a second try when the window does not fit)
 # No token goes into the containers: the ranks read only the local cache (HF_HUB_OFFLINE=1), and with HF_HUB_OFFLINE=0

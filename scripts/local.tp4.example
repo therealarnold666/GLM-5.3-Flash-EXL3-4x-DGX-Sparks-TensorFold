@@ -4,6 +4,7 @@ WORKER=user@192.0.2.11
 WORKER2=user@192.0.2.12
 WORKER3=user@192.0.2.13
 MASTER_ADDR=192.0.2.10
+SPLIT=0  # Direct P2P hyper-connection exchange needs a full mesh. For SPLIT=1, set TF_GLM_HC_EXCHANGE=gather.
 
 # Pin the HCA names and RoCE v2 GID index from the already working TP4 vLLM ring.
 # Each HCA is one PCI function of a different physical CX7 port.

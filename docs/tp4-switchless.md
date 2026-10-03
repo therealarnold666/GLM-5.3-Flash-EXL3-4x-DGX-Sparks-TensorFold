@@ -20,12 +20,24 @@ Each edge may have two rails. Rank 0–2 and rank 1–3 have no direct cable. SS
 
 TensorFold must run with `COMM=nccl` on this layout. MiaAI's one-shot `RoceComm` builds direct rank-to-rank queue pairs; the two diagonal pairs cannot form such a connection. The patched NCCL library runs the ring collectives over the four direct edges. The launcher refuses a missing or different NCCL library on any rank, verifies `LD_PRELOAD` inside the image, and sets `TF_NCCL_LIB` to the mounted library for TensorFold's own loader.
 
+Keep `SPLIT=0` for the first ring start (the TP4 default). With `SPLIT=1`, the default hyper-connection exchange opens direct P2P connections to every rank, including the uncabled diagonals, and times out. A later experiment can use `SPLIT=1 TF_GLM_HC_EXCHANGE=gather`, which uses NCCL collectives over the ring; validate its output and performance before adopting it.
+
 ## Prepare a site
 
 1. Put the same patched NCCL `libnccl.so.2` on all four machines. The library from a proven four-Spark switchless vLLM deployment can be reused; the launcher checks its SHA256 on every rank.
 2. Copy `scripts/local.tp4.example` to `scripts/local.sh` on rank 0 and fill in the real SSH targets, management address, two HCA names and RoCE v2 GID for each rank. `scripts/local.sh` is local state and must not be committed.
 3. Make the TensorFold checkpoint and DFlash2 model accessible on rank 0. `scripts/prepare.sh` can copy missing files to each worker; this may move hundreds of GiB. Use `WORKER_WEIGHTS=copy` unless an NFS export is reachable from **every** worker. In particular, a switchless diagonal worker may not reach the head over CX7.
 4. Stop the existing GPU inference containers on all four Sparks. The TP4 launcher refuses to start while another GPU container is running.
+
+If the pinned published image is unreachable but the CUDA 13.0 vLLM base image is already available locally, build the fallback image from this fork:
+
+```bash
+git clone --depth 1 --branch v0.6.0 https://github.com/ashhart/TensorFold.git tf-src
+docker build -f deploy/Dockerfile.local-base -t tensorfold-glm53:v0.6.0 \
+  --build-arg PATCHES_HASH="$(bash -c 'source scripts/config.sh; image_hash')" .
+```
+
+Load the resulting image on each worker (`docker save` piped through SSH to `docker load`). This fallback image uses `/usr/bin/env` as its launch entrypoint; set `CUDA_HOST_INCLUDE=/usr/local/cuda/include` in `scripts/local.sh` when that path contains the matching CUDA 13.0 development headers on every Spark. The launcher mounts those headers inside each container for first-run CUDA extension builds.
 
 From rank 0:
 
@@ -39,7 +51,9 @@ curl -fsS http://127.0.0.1:8890/v1/models
 
 `./start-tp4.sh restart` stops and restarts the four TensorFold ranks after preflight. Workers start in rank 3, 2, 1 order; rank 0 starts last. The TP4 container name, state directory and API port are separate from MiaAI's TP2 recipe. Port 8890 is the default; choose another free port with `PORT=...`.
 
-Defaults for the first validation run: `CONTEXT=1048576`, `PARALLEL=4`, `KV=fp8`, `KV_POOL_GIB=24`, `MEMORY_RESERVE_GIB=20`, `DRAFTER=dflash2`. These are conservative **starting settings**, not measured optima. TensorFold's capacity gate may reduce the context if the actual free-memory budget is smaller.
+For a permanent deployment in `%h/glm53-tf-tp4`, copy `deploy/glm53-tf-tp4*.service` and `deploy/glm53-tf-tp4-watch.timer` to `~/.config/systemd/user/`, run `systemctl --user daemon-reload`, then enable the service and timer. The watchdog probes `/health` twice before restarting the four ranks. Keep any previous inference unit and watchdog disabled while TensorFold owns the GPUs.
+
+Defaults for the first validation run: `CONTEXT=1048576`, `PARALLEL=4`, `KV=fp8`, `KV_POOL_GIB=24`, `MEMORY_RESERVE_GIB=20`, `DRAFTER=dflash2`, `SPLIT=0`. These are conservative **starting settings**, not measured optima. TensorFold's capacity gate may reduce the context if the actual free-memory budget is smaller.
 
 ## Validation before production use
 
@@ -63,4 +77,4 @@ The checkpoint, quantization, model behavior and per-request maximum context are
 
 ## Rollback
 
-`./start-tp4.sh stop` stops this fork's four TensorFold containers. Restore the previous vLLM service with its existing systemd unit or launcher, then check its `/health` and one completion. The TensorFold fork does not alter the vLLM image, weights, systemd unit or port 8888.
+`./start-tp4.sh stop` stops this fork's four TensorFold containers. Restore the previous vLLM service with its existing systemd unit or launcher, then check its `/health` and one completion. This deployment uses port 8890 for the model API; the existing port 8888 console gateway forwards to it. The TensorFold fork does not alter the vLLM image, weights or systemd unit.

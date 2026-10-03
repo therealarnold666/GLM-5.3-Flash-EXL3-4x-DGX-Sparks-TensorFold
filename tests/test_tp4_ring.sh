@@ -49,7 +49,7 @@ cp scripts/config.sh "$tmp_cfg/scripts/config.sh"
 (
   source "$tmp_cfg/scripts/config.sh"
   [[ "$CONTAINER_NAME" == glm53-flash-tf-tp4 && "$PORT" == 8890 ]]
-  [[ "$MEMORY_RESERVE_GIB" == 20 && "$KV_POOL_GIB" == 24 ]]
+  [[ "$MEMORY_RESERVE_GIB" == 20 && "$KV_POOL_GIB" == 24 && "$SPLIT" == 0 ]]
   [[ "$STATE_DIR" == "$HOME/.local/state/glm53-tensorfold-tp4" ]]
 )
 (

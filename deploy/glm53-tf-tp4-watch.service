@@ -1,0 +1,7 @@
+[Unit]
+Description=Check TensorFold GLM-5.3 TP4 health and recover if needed
+
+[Service]
+Type=oneshot
+ExecStart=%h/glm53-tf-tp4/scripts/tf-watch.sh
+TimeoutStartSec=45min

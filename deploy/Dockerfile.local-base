@@ -1,0 +1,14 @@
+# Offline-capable fallback when the published TensorFold image cannot be pulled.
+# Build from the locally available CUDA 13.0 / PyTorch image; the host launcher's
+# CUDA_HOST_INCLUDE mounts the matching complete development headers.
+FROM ghcr.io/tonyd2wild/vllm-glm53-flash:sm121-v11-dflash2
+COPY tf-src /opt/tf-src
+RUN python3 -m pip install --no-cache-dir /opt/tf-src 'av==18.1.0' 'xgrammar>=0.2.8,<0.3' && tensorfold --version
+COPY patches /opt/tf-patches
+RUN cd "$(python3 -c 'import os,tensorfold; print(os.path.dirname(os.path.dirname(tensorfold.__file__)))')" && \
+    for p in /opt/tf-patches/*.patch; do patch -p0 --forward < "$p" || exit 1; done && \
+    python3 -c 'import tensorfold.cuda.server, tensorfold.families.glm5_next.cuda.engine, tensorfold.vision.glm, av, xgrammar'
+ARG PATCHES_HASH
+LABEL tf.patches=${PATCHES_HASH}
+ENV HF_HOME=/root/.cache/huggingface TORCH_EXTENSIONS_DIR=/cache/torch_extensions TRITON_CACHE_DIR=/cache/triton
+WORKDIR /workspace

@@ -1,0 +1,11 @@
+[Unit]
+Description=Check TensorFold GLM-5.3 TP4 every two minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=15s
+Unit=glm53-tf-tp4-watch.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=TensorFold GLM-5.3 Flash TP4 on four DGX Sparks
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/glm53-tf-tp4
+ExecStart=%h/glm53-tf-tp4/start-tp4.sh
+ExecStop=%h/glm53-tf-tp4/start-tp4.sh stop
+RemainAfterExit=yes
+TimeoutStartSec=40min
+TimeoutStopSec=5min
+Restart=on-failure
+RestartSec=1min
+
+[Install]
+WantedBy=default.target
