@@ -42,15 +42,19 @@ fi
 if ( COMM=roce; check_workers ) >/dev/null 2>&1; then
   echo 'direct RoCE mode was accepted on a switchless ring' >&2; exit 1
 fi
+tmp_cfg=$(mktemp -d)
+trap 'rm -rf "$tmp_cfg"' EXIT
+mkdir "$tmp_cfg/scripts"
+cp scripts/config.sh "$tmp_cfg/scripts/config.sh"
 (
-  source scripts/config.sh
+  source "$tmp_cfg/scripts/config.sh"
   [[ "$CONTAINER_NAME" == glm53-flash-tf-tp4 && "$PORT" == 8890 ]]
   [[ "$MEMORY_RESERVE_GIB" == 20 && "$KV_POOL_GIB" == 24 ]]
   [[ "$STATE_DIR" == "$HOME/.local/state/glm53-tensorfold-tp4" ]]
 )
 (
   PORT=9001 MEMORY_RESERVE_GIB=22
-  source scripts/config.sh
+  source "$tmp_cfg/scripts/config.sh"
   [[ "$PORT" == 9001 && "$MEMORY_RESERVE_GIB" == 22 ]]
 )
 printf '%s\n' 'TP4 ring topology tests passed'
