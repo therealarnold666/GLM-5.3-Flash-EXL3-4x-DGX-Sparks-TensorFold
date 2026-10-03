@@ -20,7 +20,7 @@ Each edge may have two rails. Rank 0–2 and rank 1–3 have no direct cable. SS
 
 TensorFold must run with `COMM=nccl` on this layout. MiaAI's one-shot `RoceComm` builds direct rank-to-rank queue pairs; the two diagonal pairs cannot form such a connection. The patched NCCL library runs the ring collectives over the four direct edges. The launcher refuses a missing or different NCCL library on any rank, verifies `LD_PRELOAD` inside the image, and sets `TF_NCCL_LIB` to the mounted library for TensorFold's own loader.
 
-Keep `SPLIT=0` for the first ring start (the TP4 default). With `SPLIT=1`, the default hyper-connection exchange opens direct P2P connections to every rank, including the uncabled diagonals, and times out. A later experiment can use `SPLIT=1 TF_GLM_HC_EXCHANGE=gather`, which uses NCCL collectives over the ring; validate its output and performance before adopting it.
+Keep `SPLIT=0` for the first ring start (the TP4 default). `SPLIT=1` now automatically sets `TF_GLM_HC_EXCHANGE=gather`: MiaAI's four-rank split uses NCCL all-gathers for the fp32 partials and the bf16 glued rows, so NCCL carries them over the cabled ring. It does not create a direct link between ranks 0–2 or 1–3. An explicit `TF_GLM_HC_EXCHANGE=p2p` with ring split is refused before containers are stopped, because NCCL send/receive would try those missing links. This path is not yet qualified on this four-node cluster; compare split and unsplit output, memory, and cold-prefill speed before keeping `SPLIT=1` in the site configuration.
 
 ## Prepare a site
 

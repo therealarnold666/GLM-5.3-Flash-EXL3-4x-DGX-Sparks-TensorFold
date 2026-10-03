@@ -50,7 +50,19 @@ cp scripts/config.sh "$tmp_cfg/scripts/config.sh"
   source "$tmp_cfg/scripts/config.sh"
   [[ "$CONTAINER_NAME" == glm53-flash-tf-tp4 && "$PORT" == 8890 ]]
   [[ "$MEMORY_RESERVE_GIB" == 20 && "$KV_POOL_GIB" == 24 && "$SPLIT" == 0 ]]
+  [[ "$TF_GLM_HC_EXCHANGE" == gather && "$TF_GLM_PREFILL_OVERLAP" == 0 ]]
   [[ "$STATE_DIR" == "$HOME/.local/state/glm53-tensorfold-tp4" ]]
+)
+(
+  SPLIT=1
+  source "$tmp_cfg/scripts/config.sh"
+  [[ "$SPLIT" == 1 && "$TF_GLM_HC_EXCHANGE" == gather && "$TF_GLM_PREFILL_OVERLAP" == 2 ]]
+  [[ "$(env | sed -n 's/^TF_GLM_HC_EXCHANGE=//p')" == gather ]]
+)
+(
+  TOPOLOGY=full-mesh
+  source "$tmp_cfg/scripts/config.sh"
+  [[ "$SPLIT" == 1 && "$TF_GLM_HC_EXCHANGE" == p2p ]]
 )
 (
   PORT=9001 MEMORY_RESERVE_GIB=22

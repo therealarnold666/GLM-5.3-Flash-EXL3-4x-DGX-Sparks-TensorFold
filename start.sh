@@ -66,8 +66,9 @@ check_workers
 [[ "$MAX_TOKENS" =~ ^[1-9][0-9]*$ ]] || die "MAX_TOKENS is a token count, not $MAX_TOKENS"
 [[ "$DRAFTER" == dflash2 || "$PARALLEL" == 1 ]] || die "PARALLEL=$PARALLEL needs DRAFTER=dflash2 (mtp serves one request at a time: PARALLEL=1)"
 for v in SPLIT SHARED_PREFIX KDA_CHUNKED COPY_CODE MULTI_PREFILL STREAM_SMOOTH; do [[ "${!v}" =~ ^[01]$ ]] || die "$v is 0 or 1, not ${!v}"; done
-if [[ "$TOPOLOGY" == switchless-ring && "$SPLIT" == 1 && "${TF_GLM_HC_EXCHANGE:-p2p}" != gather ]]; then
-  die 'SPLIT=1 on a switchless ring needs TF_GLM_HC_EXCHANGE=gather; direct P2P cannot cross the missing diagonals'
+[[ "$TF_GLM_HC_EXCHANGE" =~ ^(p2p|gather)$ ]] || die "TF_GLM_HC_EXCHANGE is p2p or gather, not $TF_GLM_HC_EXCHANGE"
+if [[ "$TOPOLOGY" == switchless-ring && "$SPLIT" == 1 && "$TF_GLM_HC_EXCHANGE" != gather ]]; then
+  die 'SPLIT=1 on a switchless ring requires NCCL gather; direct P2P cannot cross the missing diagonals'
 fi
 [[ "$WORKER_WEIGHTS" == copy || "$WORKER_WEIGHTS" == nfs ]] || die "WORKER_WEIGHTS is copy or nfs, not $WORKER_WEIGHTS"
 DRY=0; [[ "${DRY_RUN:-0}" == 1 ]] && DRY=1

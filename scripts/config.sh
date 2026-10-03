@@ -166,9 +166,10 @@ export TF_GLM_DFLASH_POLICY="$DRAFT_POLICY"
 # pay ~1.5%. The overlap also runs the next block's front on its own rows during the exchanges (patch 0033; with
 # COPY_CODE below, two boots each: a 149k prompt 92.8 -> 90.7 s). Same bits. SPLIT=0 turns it off.
 # A switchless ring has no rank 0-2 or 1-3 P2P path. Its split warm-up opens a direct connection to every rank,
-# so keep the split off unless explicitly enabled with TF_GLM_HC_EXCHANGE=gather.
-if [[ "$TOPOLOGY" == switchless-ring ]]; then _split=0; else _split=1; fi
+# so keep the split off by default. If enabled, use the TP-N split's NCCL all-gathers, which follow the physical ring.
+if [[ "$TOPOLOGY" == switchless-ring ]]; then _split=0; _exchange=gather; else _split=1; _exchange=p2p; fi
 SPLIT="${SPLIT:-$_split}"
+export TF_GLM_HC_EXCHANGE="${TF_GLM_HC_EXCHANGE:-$_exchange}"
 export TF_GLM_HC_SPLIT="$SPLIT" TF_GLM_PREFILL_OVERLAP="$([[ "$SPLIT" == 1 ]] && echo 2 || echo 0)"
 # KDA prompt chunks in chunked (WY) form, one CUDA kernel of 32-row sub-chunks (patches 0012, 0014, 0039): prefill
 # 50k 29.3 -> 26.4 s, 149k 91.1 -> 84.5 s (one boot each); prompt states then sit on a 64-token grid.
