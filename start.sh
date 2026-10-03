@@ -159,7 +159,7 @@ why="scripts/prepare.sh did not"; [[ "${PREPARE:-auto}" == 0 ]] && why="PREPARE=
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing: $why build it"
 if [[ "$TOPOLOGY" == switchless-ring ]]; then
   docker run --rm --entrypoint python -v "$NCCL_HOST_DIR:/nccl:ro" \
-    -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" "$IMAGE" -c \
+    -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" -e "TF_NCCL_LIB=/nccl/$NCCL_SO_NAME" "$IMAGE" -c \
     'import pathlib; assert "/nccl/libnccl.so" in pathlib.Path("/proc/self/maps").read_text()' \
     >/dev/null || die "the patched NCCL library did not preload in $IMAGE"
 fi
@@ -310,7 +310,7 @@ launch() {
     ring_args=()
     if [[ "$TOPOLOGY" == switchless-ring ]]; then
       nccl_dir=$(rank_nccl_dir "$i")
-      ring_args=(-v "$nccl_dir:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME")
+      ring_args=(-v "$nccl_dir:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" -e "TF_NCCL_LIB=/nccl/$NCCL_SO_NAME")
     fi
     worker_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}" "${ring_args[@]}"
                 $(rank_nccl_env "$i")
@@ -330,7 +330,7 @@ launch() {
   log "Rank 0 here: ${rank0[*]}"
   ring_args=()
   if [[ "$TOPOLOGY" == switchless-ring ]]; then
-    ring_args=(-v "$NCCL_HOST_DIR:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME")
+    ring_args=(-v "$NCCL_HOST_DIR:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" -e "TF_NCCL_LIB=/nccl/$NCCL_SO_NAME")
   fi
   here_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}" "${ring_args[@]}"
             $(rank_nccl_env 0)

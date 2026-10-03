@@ -18,7 +18,7 @@ rank 3        ── rank 2
 
 Each edge may have two rails. Rank 0–2 and rank 1–3 have no direct cable. SSH and TensorFold's master rendezvous use the management LAN; the model collectives use CX7. The launcher confirms all four cycle edges have a shared CX7 subnet, permits the two missing diagonals and refuses a missing cycle edge.
 
-TensorFold must run with `COMM=nccl` on this layout. MiaAI's one-shot `RoceComm` builds direct rank-to-rank queue pairs; the two diagonal pairs cannot form such a connection. The patched NCCL library runs the ring collectives over the four direct edges. The launcher refuses a missing or different NCCL library on any rank and verifies `LD_PRELOAD` inside the image before starting inference.
+TensorFold must run with `COMM=nccl` on this layout. MiaAI's one-shot `RoceComm` builds direct rank-to-rank queue pairs; the two diagonal pairs cannot form such a connection. The patched NCCL library runs the ring collectives over the four direct edges. The launcher refuses a missing or different NCCL library on any rank, verifies `LD_PRELOAD` inside the image, and sets `TF_NCCL_LIB` to the mounted library for TensorFold's own loader.
 
 ## Prepare a site
 
