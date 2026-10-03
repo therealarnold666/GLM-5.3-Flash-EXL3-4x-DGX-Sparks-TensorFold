@@ -158,9 +158,9 @@ ARG TF_SPEC
 ARG EXTRAS
 RUN pip install --no-cache-dir --upgrade "${TF_SPEC}" && pip install --no-cache-dir ${EXTRAS} && tensorfold --version
 COPY . /opt/tf-patches
-RUN cd "$(python -c 'import os, tensorfold; print(os.path.dirname(os.path.dirname(tensorfold.__file__)))')" && \
+RUN cd "$(python3 -c 'import os, tensorfold; print(os.path.dirname(os.path.dirname(tensorfold.__file__)))')" && \
     for p in /opt/tf-patches/*.patch; do [ -e "$p" ] || continue; echo "applying $p"; patch -p0 --forward < "$p" || exit 1; done && \
-    python -c "import tensorfold.cuda.server, tensorfold.families.glm5_next.cuda.engine, tensorfold.vision.glm, av, xgrammar"
+    python3 -c "import tensorfold.cuda.server, tensorfold.families.glm5_next.cuda.engine, tensorfold.vision.glm, av, xgrammar"
 ARG PATCHES_HASH
 LABEL tf.patches=${PATCHES_HASH}
 ENV HF_HOME=/root/.cache/huggingface TORCH_EXTENSIONS_DIR=/cache/torch_extensions TRITON_CACHE_DIR=/cache/triton
@@ -201,7 +201,7 @@ download() {  # <repo id> <revision or empty>
     hf download "$1" ${2:+--revision "$2"} --cache-dir "$HF_CACHE/hub" >/dev/null
   else
     # Keep downloads owned by the host user, in the same HF_CACHE/hub layout as the host CLI.
-    docker run --rm --user "$(id -u):$(id -g)" --network host --entrypoint python \
+    docker run --rm --user "$(id -u):$(id -g)" --network host --entrypoint python3 \
       ${HF_TOKEN:+-e HF_TOKEN} ${HF_ENDPOINT:+-e HF_ENDPOINT} ${HF_HUB_OFFLINE:+-e HF_HUB_OFFLINE} \
       -v "$HF_CACHE":/hf -e HF_HOME=/hf -e HOME=/tmp "$IMAGE" -c \
       'import sys; from huggingface_hub import snapshot_download; snapshot_download(sys.argv[1], revision=sys.argv[2] or None)' "$1" "$2"

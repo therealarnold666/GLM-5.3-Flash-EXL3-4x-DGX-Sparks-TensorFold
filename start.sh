@@ -158,7 +158,7 @@ why="scripts/prepare.sh did not"; [[ "${PREPARE:-auto}" == 0 ]] && why="PREPARE=
 (( DRY )) && why="DRY_RUN: scripts/prepare.sh would"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing: $why build it"
 if [[ "$TOPOLOGY" == switchless-ring ]]; then
-  docker run --rm --entrypoint python -v "$NCCL_HOST_DIR:/nccl:ro" \
+  docker run --rm --entrypoint python3 -v "$NCCL_HOST_DIR:/nccl:ro" \
     -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" -e "TF_NCCL_LIB=/nccl/$NCCL_SO_NAME" "$IMAGE" -c \
     'import pathlib; assert "/nccl/libnccl.so" in pathlib.Path("/proc/self/maps").read_text()' \
     >/dev/null || die "the patched NCCL library did not preload in $IMAGE"
@@ -208,7 +208,7 @@ SERVE_ARGS=(--drafter "$DRAFTER_ARG" "${SERVE_ARGS[@]}")   # a --drafter on the 
 # ---------------------------------------------------------------- 2. checks
 step 2 "Checks: arguments, link, previous server, port, memory"
 # tensorfold's own parser, in a throwaway container without the GPU: a typo fails here, before anything is stopped
-docker run --rm --entrypoint python "$IMAGE" -c \
+docker run --rm --entrypoint python3 "$IMAGE" -c \
   'import sys; from tensorfold.cli import build_parser; build_parser().parse_args(sys.argv[1:])' \
   serve "$MODEL_ARG" --tp "$TP" --rank 0 --master 127.0.0.1 --host "$HOST" --port "$PORT" "${SERVE_ARGS[@]}" >/dev/null 2>"$STATE_DIR/args.err" ||
   if (( DRY )); then warn "DRY_RUN: tensorfold serve in $IMAGE rejects these arguments: $(tail -1 "$STATE_DIR/args.err")"
