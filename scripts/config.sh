@@ -93,11 +93,11 @@ export TF_GLM_MTP="${TF_GLM_MTP:-auto}"
 VISION="${VISION:-1}"
 VISION_URLS="${VISION_URLS:-0}"
 # Concurrent requests (patches 0026-0030, 0035, 0040, 0041: one shared pool of per-token caches, one batched verify window
-# a round): 1 to 8 (patch 0069: 5 to 8, measurements to come), with DRAFTER=dflash2 only (mtp: 1). 4 (default), prose
-# in all (sparkDash): 60.4 / 79.2 / 89.5 / 108.8 tok/s at 1 / 2 / 3 / 4 at once; structured 114.7 / 147.6 / 196.3 /
-# 227.9. Each stream past the first takes ~210 MiB a Spark at start (its KDA states, index rings and DFlash2 ring;
-# ~150 MiB with TP=3); every stream shares the one pool of per-token caches, so more streams do not grow it.
-if [[ "$DRAFTER" == dflash2 ]]; then _par=4; else _par=1; fi
+# a round): 1 to 8 (patch 0069), with DRAFTER=dflash2 only (mtp: 1). Default 4 on two Sparks, 8 on three (v1.5).
+# sparkDash aggregate decode at 4 / 8 requests at once: two Sparks prose 103.2 / 130.8 tok/s, code 126.7 / 167.0; three
+# Sparks prose 121.8 / 166.0, code 165.3 / 211.5. One request alone decodes as fast either way. The memory reserve
+# grows with PARALLEL (below), so the shared pool shrinks: two Sparks ~1.5M tokens at 8 (2.0-2.6M at 4), three ~4M.
+if [[ "$DRAFTER" != dflash2 ]]; then _par=1; elif [[ "${TP:-2}" == 3 ]]; then _par=8; else _par=4; fi
 PARALLEL="${PARALLEL:-$_par}"
 # The DSA latent cache and the indexer's pooled keys (patch 0038): fp8 (default) holds them as e4m3 rows with a
 # power-of-two scale each, half bf16's bytes: the 1M-token window with 4 streams fits (rank 0: 88.09 GiB estimated,
@@ -175,11 +175,15 @@ export TF_GLM_WIDE_GRAPHS="$_w" TF_GLM_COPY_REPLY_MATCH="$_w"
 # Off by default until that move keeps them. Exact either way.
 export TF_GLM_MULTI_LONE="${TF_GLM_MULTI_LONE:-0}"
 # --parallel: rows of every request's verify window together in a round (patch 0069; TensorFold's TF_GLM_MULTI_WINDOW):
-# 32 (default, as before) or 16 to 64 in steps of 8. With more requests at once each one's drafts get fewer of these
-# rows (8 streams at 32: ~3 drafts each); a wider window verifies more of them a round at a higher round cost. Past 48
-# rows the startup estimate grows (64: ~250 MiB a Spark), and past 32 a round's all-gathers exceed TF_ROCE_MAX_KB=512
-# (16 KiB a row) and go through NCCL unless it is raised (1024 for 64). Measurements to come. Exact at any size.
-export TF_GLM_MULTI_WINDOW="${TF_GLM_MULTI_WINDOW:-32}"
+# 16 to 64 in steps of 8; default 64 past 4 requests, else 32. With more requests at once each one's drafts get fewer of
+# these rows (8 at 32: ~3 drafts each): at 8 requests, code 141.2 (32 rows) / 160.3 (48) / 167.0 (64) tok/s, prose the
+# same at any size (two Sparks). Past 32 rows a round's all-gathers exceed 512 KiB (16 KiB a row): TF_ROCE_MAX_KB rises
+# with it (64 rows: 1024) unless you set it. Exact at any size; 64 rows add ~250 MiB a Spark to the estimate.
+if (( PARALLEL > 4 )); then _win=64; else _win=32; fi
+export TF_GLM_MULTI_WINDOW="${TF_GLM_MULTI_WINDOW:-$_win}"
+if (( TF_GLM_MULTI_WINDOW > 32 )) && [[ "$TF_ROCE_MAX_KB" == 512 ]]; then
+  export TF_ROCE_MAX_KB=$(( TF_GLM_MULTI_WINDOW * 16 ))
+fi
 # Kept prompt states (TensorFold's TF_GLM_CACHE_ENTRIES, 8 by default): the oldest is dropped past this count, however
 # much of the pool is free. A drafted agent request keeps 1 to 3 (its own plus shared-prefix states), so 8 let three
 # or four alternating conversations push each other out (issue #17). Each entry reserves its fixed state (~45 MiB) at
@@ -229,7 +233,13 @@ export TF_GLM_SHARED_PREFIX="$SHARED_PREFIX"
 # about 4.5 GiB there, and the pool comes out at ~2.1-2.9M tokens depending on what is free at start. TensorFold's own
 # defaults (a tenth of RAM, ~12.2; 3 GiB: pool 1,411,072 tokens) leave more. Raise the reserve if other work shares
 # the Sparks' memory.
-MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-14.5}"
+# Past 4 requests, or a verify window past 32 rows, the server takes more than its estimate counts (measured on two
+# Sparks, rank 0's lowest free memory: PARALLEL=4 10.8 GiB, PARALLEL=8 7.0, PARALLEL=8 with a 64-row window 5.8): the
+# reserve grows by that much (~0.95 GiB a request past 4, ~0.04 GiB a row past 32), so the lowest free memory stays
+# where PARALLEL=4 has it; the pool shrinks instead.
+_extra=$(awk -v p="$PARALLEL" -v w="${TF_GLM_MULTI_WINDOW:-32}" 'BEGIN { e = 0; if (p > 4) e += 0.95 * (p - 4);
+  if (w > 32) e += 0.04 * (w - 32); printf "%.1f", e }')
+MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-$(awk -v e="$_extra" 'BEGIN { printf "%.1f", 14.5 + e }')}"
 export TENSORFOLD_MEMORY_RESERVE_GIB="$MEMORY_RESERVE_GIB"
 # With more Sparks each holds fewer weights, so the pool can take more (the per-token KV cost is the same on every
 # rank: the latent cache is replicated). TP=3: 32 GiB leaves rank 0, the busiest, ~5 GiB under a 1M-token prompt
