@@ -5,3 +5,4 @@ WORKER=user@192.0.2.2          # ssh target of the second Spark (key-based: ssh-
 # WORKER2=user@192.0.2.3       # rank 2
 # WORKER_WEIGHTS2=nfs          # per worker: copy or nfs (default: WORKER_WEIGHTS)
 # WORKER_HF_CACHE2=/models/hf   # per worker: its Hugging Face cache when it is not its HF_HOME
+# Four Sparks on a direct CX7 cycle: copy scripts/local.tp4.example into this file and edit it.

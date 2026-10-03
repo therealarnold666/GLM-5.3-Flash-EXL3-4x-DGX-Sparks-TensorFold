@@ -1,4 +1,5 @@
-# The Sparks: this machine (rank 0), and the workers over ssh: WORKER (rank 1), WORKER2 (rank 2).
+# The Sparks: this machine (rank 0), and the workers over ssh: WORKER (rank 1), WORKER2 (rank 2),
+# WORKER3 (rank 3). TP=4 uses a switchless cycle 0-1-2-3-0.
 # Each node's links to the others are found from the routes and subnets between them.
 # Sourced by start.sh, stop.sh and prepare.sh after config.sh.
 
@@ -10,14 +11,71 @@ wval() { local v; v=$(wvar "$1" "$2"); echo "${!v:-}"; }
 worker_host() { wval WORKER "$1"; }
 # The workers this start uses (1 .. TP-1), and every worker configured at all (stop.sh stops them all).
 worker_ids() { seq 1 $((TP - 1)); }
-configured_workers() { local i; for i in 1 2; do [[ -z "$(worker_host "$i")" ]] || echo "$i"; done; }
+configured_workers() { local i; for i in 1 2 3; do [[ -z "$(worker_host "$i")" ]] || echo "$i"; done; }
 # worker i's weights: WORKER_WEIGHTS for worker 1, WORKER_WEIGHTS<i> (default: WORKER_WEIGHTS) for the others
 worker_weights() { local w; w=$(wval WORKER_WEIGHTS "$1"); echo "${w:-$WORKER_WEIGHTS}"; }
 
-# check_workers: TP is 2 or 3, and WORKER .. WORKER<TP-1> are set and distinct (later ones are left out).
+# The same switchless NCCL build must be present on all four nodes. Worker directories can be
+# supplied in local.sh; otherwise use each worker's own home directory.
+rank_nccl_dir() {
+  local r=$1 key dir
+  if (( r == 0 )); then echo "$NCCL_HOST_DIR"; return; fi
+  case "$r" in
+    1) key=WORKER_NCCL_HOST_DIR ;;
+    2) key=WORKER2_NCCL_HOST_DIR ;;
+    3) key=WORKER3_NCCL_HOST_DIR ;;
+    *) die "invalid NCCL rank $r" ;;
+  esac
+  dir=${!key:-}
+  [[ -n "$dir" ]] || dir=$(worker "$r" 'printf "%s/nccl-switchless-v0.0.1" "$HOME"')
+  echo "$dir"
+}
+
+check_ring_nccl() {
+  [[ "$TOPOLOGY" == switchless-ring ]] || return 0
+  [[ "$NCCL_SO_NAME" =~ ^libnccl\.so\.[A-Za-z0-9.]+$ ]] || die "invalid NCCL_SO_NAME: $NCCL_SO_NAME"
+  local dir path expected got r
+  dir=$(rank_nccl_dir 0); path="$dir/$NCCL_SO_NAME"
+  [[ "$dir" =~ ^/[A-Za-z0-9_./-]+$ && -f "$path" ]] || die "patched NCCL missing on rank 0: $path"
+  expected=$(sha256sum "$path" | awk '{print $1}')
+  for r in 1 2 3; do
+    [[ -z "${WORKER_DOWN[$r]:-}" ]] || { warn "DRY_RUN: cannot check patched NCCL on rank $r"; continue; }
+    dir=$(rank_nccl_dir "$r"); path="$dir/$NCCL_SO_NAME"
+    [[ "$dir" =~ ^/[A-Za-z0-9_./-]+$ ]] || die "invalid NCCL directory on rank $r: $dir"
+    got=$(worker "$r" "sha256sum '$path'" 2>/dev/null | awk '{print $1}') || true
+    [[ "$got" == "$expected" ]] || die "rank $r's patched NCCL is missing or differs from rank 0: $path"
+  done
+  log "Patched NCCL matches on all reachable ranks (sha256 ${expected:0:12})"
+}
+
+# A second inference container would compete for GB10 unified memory and make a TP4 load unsafe.
+# Exclude this recipe's own container so `restart` can perform its orderly stop after preflight.
+gpu_containers() {
+  local c requests
+  while IFS= read -r c; do
+    [[ -n "$c" && "$c" != "$CONTAINER_NAME" ]] || continue
+    requests=$(docker inspect -f '{{json .HostConfig.DeviceRequests}}' "$c" 2>/dev/null || true)
+    [[ "$requests" == *'"gpu"'* || "$requests" == *'"nvidia"'* ]] && echo "$c"
+  done < <(docker ps --format '{{.Names}}')
+}
+check_ring_gpu_exclusive() {
+  [[ "$TOPOLOGY" == switchless-ring ]] || return 0
+  local others r
+  others=$(gpu_containers)
+  [[ -z "$others" ]] || die "rank 0 has another GPU container ($others); stop it before TP4 TensorFold starts"
+  for r in 1 2 3; do
+    [[ -z "${WORKER_DOWN[$r]:-}" ]] || continue
+    others=$(worker "$r" "CONTAINER_NAME='$CONTAINER_NAME'; $(declare -f gpu_containers); gpu_containers")
+    [[ -z "$others" ]] || die "rank $r has another GPU container ($others); stop it before TP4 TensorFold starts"
+  done
+}
+
+# check_workers: WORKER .. WORKER<TP-1> are set and distinct (later ones are left out).
 check_workers() {
   local i j h
-  [[ "$TP" =~ ^[23]$ ]] || die "TP is 2 (./start.sh) or 3 (./start-tp3.sh, experimental) Sparks, not $TP"
+  [[ "$TP" =~ ^[234]$ ]] || die "TP is 2, 3 or 4 Sparks, not $TP"
+  [[ "$TOPOLOGY" != switchless-ring || "$TP" == 4 ]] || die "TOPOLOGY=switchless-ring requires TP=4"
+  [[ "$TOPOLOGY" != switchless-ring || "$COMM" == nccl ]] || die "the switchless ring requires COMM=nccl: direct RoCE all-gather cannot reach diagonal ranks"
   for i in $(worker_ids); do
     h=$(worker_host "$i")
     [[ -n "$h" ]] || die "TP=$TP needs $((TP - 1)) workers: set $(wvar WORKER "$i")=user@<address of rank $i> in scripts/local.sh (see scripts/local.sh.example)"
@@ -344,8 +402,30 @@ detect_links() {
       warn "DRY_RUN: the link between ranks $a and $b is unknown (a worker that cannot be reached)"
       continue
     fi
+    if [[ "$TOPOLOGY" == switchless-ring && ( "$line" == 0-2 || "$line" == 1-3 ) ]]; then
+      continue  # a four-node cycle has no diagonal cable; patched NCCL uses its four edges
+    fi
+    if [[ "$TOPOLOGY" == switchless-ring ]]; then
+      die "the switchless cycle is missing its rank $a-$b CX7 edge (required: 0-1, 1-2, 2-3, 3-0)"
+    fi
     die "ranks $a and $b share no RoCE subnet: $TP Sparks need a link between every pair (a triangle of direct cables; see README)"
   done
+  if [[ "$TOPOLOGY" == switchless-ring ]]; then
+    # The current TP4 site uses one PCI function per physical CX7 port. Pins override the discovery's
+    # full set (which can include both Socket Direct functions) and must be the same as the working vLLM ring.
+    local pin gpin r
+    for r in 0 1 2 3; do
+      case "$r" in
+        0) pin=HEAD_CX7_IB; gpin=HEAD_GID ;;
+        1) pin=WORKER_CX7_IB; gpin=WORKER_GID ;;
+        2) pin=WORKER2_CX7_IB; gpin=WORKER2_GID ;;
+        3) pin=WORKER3_CX7_IB; gpin=WORKER3_GID ;;
+      esac
+      [[ -z "${!pin:-}" ]] || NODE_HCAS[r]=${!pin}
+      [[ -z "${!gpin:-}" ]] || NODE_GID[r]=${!gpin}
+      [[ -n "${NODE_GID[r]:-}" ]] || die "rank $r needs a RoCE v2 GID index: set $gpin in scripts/local.sh"
+    done
+  fi
   return 0
 }
 
@@ -377,6 +457,17 @@ nccl_env_n() {
        ${NCCL_DEBUG:+-e NCCL_DEBUG=$NCCL_DEBUG}
 }
 rank_nccl_env() {
-  if (( TP == 2 )); then nccl_env "${NODE_DEV[$1]}" "${NODE_HCAS[$1]}" "${NODE_GID[$1]}"
+  if [[ "$TOPOLOGY" == switchless-ring ]]; then
+    echo "-e NCCL_SOCKET_IFNAME=${NODE_DEV[$1]} -e GLOO_SOCKET_IFNAME=${NODE_DEV[$1]}" \
+         "-e NCCL_IB_HCA=${NODE_HCAS[$1]} -e NCCL_IB_GID_INDEX=${NODE_GID[$1]}" \
+         "-e NCCL_IB_DISABLE=0 -e NCCL_IB_ROCE_VERSION_NUM=2 -e NCCL_NET=IB -e NCCL_NET_PLUGIN=none" \
+         "-e NCCL_NVLS_ENABLE=0 -e NCCL_CUMEM_ENABLE=0 -e NCCL_IB_MERGE_NICS=0" \
+         "-e NCCL_SKIP_TREE_CONNECT=1 -e NCCL_SWITCHLESS_RING_ONLY=1" \
+         "-e NCCL_IB_SUBNET_PREFIX_LEN=24 -e NCCL_IB_SUBNET_AWARE_ROUTING=1" \
+         "-e NCCL_ALGO=Ring -e NCCL_PROTO=LL,LL128,Simple -e NCCL_P2P_LEVEL=SYS" \
+         "-e NCCL_CROSS_NIC=1 -e NCCL_IGNORE_CPU_AFFINITY=1" \
+         "-e NCCL_MIN_NCHANNELS=${NCCL_CHANNELS:-4} -e NCCL_MAX_NCHANNELS=${NCCL_CHANNELS:-4}" \
+         "-e NCCL_DEBUG=${NCCL_DEBUG:-WARN}"
+  elif (( TP == 2 )); then nccl_env "${NODE_DEV[$1]}" "${NODE_HCAS[$1]}" "${NODE_GID[$1]}"
   else nccl_env_n "${NODE_DEV[$1]}" "${NODE_HCAS[$1]}" "${NODE_GID[$1]}"; fi
 }

@@ -59,6 +59,7 @@ SERVE_ARGS=(--context "$CONTEXT" --parallel "$PARALLEL" --max-tokens "$MAX_TOKEN
 [[ "$DENSE" =~ ^(bf16|fp8|q4)$ ]] || die "DENSE is bf16, fp8 or q4, not $DENSE"
 [[ "$COMM" =~ ^(nccl|roce)$ ]] || die "COMM is nccl or roce, not $COMM"
 check_workers
+[[ "$TOPOLOGY" == full-mesh || "$TOPOLOGY" == switchless-ring ]] || die "TOPOLOGY is full-mesh or switchless-ring, not $TOPOLOGY"
 [[ "$KV" =~ ^(bf16|fp8)$ ]] || die "KV is bf16 or fp8, not $KV"
 [[ "$CONTEXT" =~ ^[0-9]+$ && "$CONTEXT" -le 1048576 ]] || die "CONTEXT is a token count up to 1048576 (0: the largest that fits), not $CONTEXT"
 [[ "$PARALLEL" =~ ^[1-8]$ ]] || die "PARALLEL is 1 to 8, not $PARALLEL"
@@ -126,6 +127,11 @@ exec 8>"$STATE_DIR/start.lock"
 flock -n 8 || die "another ./start.sh is already running; wait for it to finish"
 need_workers
 (( DRY )) && log "DRY_RUN=1: printing the docker commands; nothing is stopped, started or prepared"
+if [[ "$TOPOLOGY" == switchless-ring ]]; then
+  detect_links
+  check_ring_nccl
+  if (( ! DRY )); then check_ring_gpu_exclusive; fi
+fi
 
 # ---------------------------------------------------------------- already running?
 all_running() { local i; running_here || return 1; for i in $(worker_ids); do running_worker "$i" || return 1; done; }
@@ -151,6 +157,12 @@ fi
 why="scripts/prepare.sh did not"; [[ "${PREPARE:-auto}" == 0 ]] && why="PREPARE=0 skipped scripts/prepare.sh, which would"
 (( DRY )) && why="DRY_RUN: scripts/prepare.sh would"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "image $IMAGE missing: $why build it"
+if [[ "$TOPOLOGY" == switchless-ring ]]; then
+  docker run --rm --entrypoint python -v "$NCCL_HOST_DIR:/nccl:ro" \
+    -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME" "$IMAGE" -c \
+    'import pathlib; assert "/nccl/libnccl.so" in pathlib.Path("/proc/self/maps").read_text()' \
+    >/dev/null || die "the patched NCCL library did not preload in $IMAGE"
+fi
 for i in $(worker_ids); do
   [[ -z "${WORKER_DOWN[$i]:-}" ]] || continue
   worker "$i" docker image inspect "$IMAGE" >/dev/null 2>&1 || { (( DRY )) && warn "image $IMAGE missing on $(wname "$i"): $why copy it there"; } ||
@@ -201,7 +213,7 @@ docker run --rm --entrypoint python "$IMAGE" -c \
   serve "$MODEL_ARG" --tp "$TP" --rank 0 --master 127.0.0.1 --host "$HOST" --port "$PORT" "${SERVE_ARGS[@]}" >/dev/null 2>"$STATE_DIR/args.err" ||
   if (( DRY )); then warn "DRY_RUN: tensorfold serve in $IMAGE rejects these arguments: $(tail -1 "$STATE_DIR/args.err")"
   else cat "$STATE_DIR/args.err" >&2; die "tensorfold serve rejects these arguments (see above); nothing was changed"; fi
-detect_links
+[[ "$TOPOLOGY" == switchless-ring ]] || detect_links
 if (( TP == 2 )); then log "Link: $HEAD_ADDR ($HEAD_DEV) <-> $WORKER_ADDR ($WORKER_DEV), RoCE $HEAD_HCAS / $WORKER_HCAS"
 else
   log "Rendezvous: $MASTER_ADDR:$MASTER_PORT; NCCL bootstrap over ${NODE_DEV[*]} (rank 0 to $((TP - 1)))"
@@ -290,12 +302,17 @@ RUN_ARGS=(--gpus all --ipc=host --network host --shm-size 16g --device /dev/infi
 # Ranks TP-1 .. 1 on their workers first, then rank 0 here, which serves the API. DRY_RUN=1 prints each rank's
 # command exactly as it would run (a worker's as the string ssh sends) and exits.
 launch() {
-  local rank0 rankw worker_cmd remote a i
-  local -a here_cmd
+  local rank0 rankw worker_cmd remote a i nccl_dir
+  local -a here_cmd ring_args
   for (( i = TP - 1; i >= 1; i-- )); do
     rankw=(tensorfold serve "$MODEL_ARG" --tp "$TP" --rank "$i" --master "$MASTER_ADDR" --master-port "$MASTER_PORT" "${SERVE_ARGS[@]}")
     log "Rank $i on $(worker_host "$i"): ${rankw[*]}"
-    worker_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}"
+    ring_args=()
+    if [[ "$TOPOLOGY" == switchless-ring ]]; then
+      nccl_dir=$(rank_nccl_dir "$i")
+      ring_args=(-v "$nccl_dir:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME")
+    fi
+    worker_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}" "${ring_args[@]}"
                 $(rank_nccl_env "$i")
                 -v "${WORKER_MOUNT[i]}" -v "\$HOME/.cache/tensorfold-glm53/$KCACHE:/cache"
                 "$IMAGE" "${rankw[@]}")
@@ -311,7 +328,11 @@ launch() {
   rank0=(tensorfold serve "$MODEL_ARG" --tp "$TP" --rank 0 --master "$MASTER_ADDR" --master-port "$MASTER_PORT"
          --name "$SERVED_NAME" --host "$HOST" --port "$PORT" "${SERVE_ARGS[@]}")
   log "Rank 0 here: ${rank0[*]}"
-  here_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}"
+  ring_args=()
+  if [[ "$TOPOLOGY" == switchless-ring ]]; then
+    ring_args=(-v "$NCCL_HOST_DIR:/nccl:ro" -e "LD_PRELOAD=/nccl/$NCCL_SO_NAME")
+  fi
+  here_cmd=(docker run -d --name "$CONTAINER_NAME" "${RUN_ARGS[@]}" "${ENV_ARGS[@]}" "${ring_args[@]}"
             $(rank_nccl_env 0)
             -v "$HF_CACHE":/root/.cache/huggingface -v "$KERNEL_CACHE/$KCACHE":/cache
             "$IMAGE" "${rank0[@]}")
@@ -376,6 +397,7 @@ for attempt in 1 2; do
   [[ "${FOREGROUND:-0}" == 1 ]] && foreground
   case "$TP" in
     3) step 4 "Loading: the weights on each Spark (~60 GiB on rank 0, ~50 on the others) (2-6 min; the very first start also compiles CUDA kernels)" ;;
+    4) step 4 "Loading: TP4 weights on each Spark (first start also compiles CUDA kernels)" ;;
     *) step 4 "Loading: ~80 GiB of weights on each Spark (2-6 min; the very first start also compiles CUDA kernels)" ;;
   esac
   # docker logs is the background job, so killing it ends the whole pipeline (no orphaned `docker logs -f`)

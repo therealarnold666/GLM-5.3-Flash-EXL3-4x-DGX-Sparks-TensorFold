@@ -380,6 +380,10 @@ devices toward all its peers, and each device's RoCE v2 GID is found on its own)
   the same three Sparks.
 - `prepare.sh` on its own takes `TP` too: `TP=3 scripts/prepare.sh`.
 
+## 4 Sparks on a switchless ring (experimental fork)
+
+This fork adds `./start-tp4.sh` for one TensorFold TP4 instance across four directly cabled DGX Sparks. It uses MiaAI's existing TP-N model patches, the verified four-node ring NCCL settings, and a matching patched NCCL library on each node. The default API port is 8890 so the configuration is separate from TP2. See [the TP4 runbook](docs/tp4-switchless.md) for cabling, site settings, validation, expected benefits and rollback. Four-Spark TensorFold performance is not yet measured.
+
 ## Configuration
 
 Every setting lives in [`scripts/config.sh`](scripts/config.sh). Set one for a single run from the environment

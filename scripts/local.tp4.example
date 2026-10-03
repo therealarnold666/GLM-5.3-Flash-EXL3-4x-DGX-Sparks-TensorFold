@@ -1,0 +1,30 @@
+# Copy to scripts/local.sh on rank 0. Rank order follows the physical cable cycle.
+# SSH and TensorFold rendezvous use the management LAN. Inference traffic uses CX7.
+WORKER=user@192.0.2.11
+WORKER2=user@192.0.2.12
+WORKER3=user@192.0.2.13
+MASTER_ADDR=192.0.2.10
+
+# Pin the HCA names and RoCE v2 GID index from the already working TP4 vLLM ring.
+# Each HCA is one PCI function of a different physical CX7 port.
+HEAD_CX7_IB=rocep1s0f0,rocep1s0f1
+WORKER_CX7_IB=rocep1s0f0,rocep1s0f1
+WORKER2_CX7_IB=rocep1s0f0,rocep1s0f1
+WORKER3_CX7_IB=rocep1s0f0,rocep1s0f1
+HEAD_GID=3
+WORKER_GID=3
+WORKER2_GID=3
+WORKER3_GID=3
+
+# The patched NCCL build must have the same SHA256 on all four nodes.
+NCCL_HOST_DIR=/home/user/nccl-switchless-v0.0.1
+WORKER_NCCL_HOST_DIR=/home/user/nccl-switchless-v0.0.1
+WORKER2_NCCL_HOST_DIR=/home/user/nccl-switchless-v0.0.1
+WORKER3_NCCL_HOST_DIR=/home/user/nccl-switchless-v0.0.1
+NCCL_SO_NAME=libnccl.so.2
+
+# Copy the already cached TensorFold checkpoint to every worker when needed.
+# For NFS, give every worker an address of the export it can actually reach.
+WORKER_WEIGHTS=copy
+WORKER_WEIGHTS2=copy
+WORKER_WEIGHTS3=copy

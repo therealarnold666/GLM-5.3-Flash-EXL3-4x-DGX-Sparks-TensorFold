@@ -27,13 +27,20 @@ fi
 unset _n _line _key _value
 
 # The Sparks: this machine serves rank 0 and the API; WORKER (ssh target, key-based) runs rank 1. TP: how many Sparks
-# (2, the default; 3 through ./start-tp3.sh, experimental: README "3 Sparks"), with WORKER2 (rank 2); a start uses
+# (2, the default; 3 through ./start-tp3.sh; 4 through ./start-tp4.sh), with WORKER2/3; a start uses
 # WORKER .. WORKER<TP-1> and leaves later ones out (stop.sh stops every configured one).
 TP="${TP:-2}"
 WORKER="${WORKER:-}"                 # e.g. user@<worker address>; set it in scripts/local.sh
 FABRIC_PEER="${FABRIC_PEER:-}"       # the worker's CX7 address when WORKER is reached over another network
 WORKER_HF_CACHE="${WORKER_HF_CACHE:-}"  # the worker's Hugging Face cache when it is not its HF_HOME (absolute path)
 WORKER2="${WORKER2:-}"; FABRIC_PEER2="${FABRIC_PEER2:-}"; WORKER_HF_CACHE2="${WORKER_HF_CACHE2:-}"   # rank 2, as WORKER / FABRIC_PEER / WORKER_HF_CACHE
+WORKER3="${WORKER3:-}"; FABRIC_PEER3="${FABRIC_PEER3:-}"; WORKER_HF_CACHE3="${WORKER_HF_CACHE3:-}"   # rank 3
+TOPOLOGY="${TOPOLOGY:-full-mesh}"      # switchless-ring only for TP=4, via the patched NCCL library
+NCCL_HOST_DIR="${NCCL_HOST_DIR:-$HOME/nccl-switchless-v0.0.1}"
+WORKER_NCCL_HOST_DIR="${WORKER_NCCL_HOST_DIR:-}"
+WORKER2_NCCL_HOST_DIR="${WORKER2_NCCL_HOST_DIR:-}"
+WORKER3_NCCL_HOST_DIR="${WORKER3_NCCL_HOST_DIR:-}"
+NCCL_SO_NAME="${NCCL_SO_NAME:-libnccl.so.2}"
 MASTER_PORT="${MASTER_PORT:-29551}"  # TensorFold's rendezvous port between the ranks (keep it on the private link)
 # The rendezvous address (rank 0's, --master): at TP=2 the head's address on the link to the worker; at TP>2 this
 # node's LAN address (what its hostname resolves to), which every worker reaches. SOCKET_IFNAME (TP>2): the netdev of
@@ -77,11 +84,13 @@ prebuilt_image() {
   local tag="${TF_VERSION}-$(image_hash)"
   if [[ "$tag" == "$IMAGE_TAG" && -n "$IMAGE_DIGEST" ]]; then echo "$GHCR_IMAGE@$IMAGE_DIGEST"; else echo "$GHCR_IMAGE:$tag"; fi
 }
-CONTAINER_NAME="${CONTAINER_NAME:-glm53-flash-tf}"           # the same name on both Sparks
+if [[ "$TOPOLOGY" == switchless-ring ]]; then _container=glm53-flash-tf-tp4; else _container=glm53-flash-tf; fi
+CONTAINER_NAME="${CONTAINER_NAME:-$_container}"  # the same name on every rank
 
 SERVED_NAME="${SERVED_NAME:-GLM-5.3-Flash-EXL3}"
 HOST="${HOST:-0.0.0.0}"
-PORT="${PORT:-8888}"
+if [[ "$TOPOLOGY" == switchless-ring ]]; then _port=8890; else _port=8888; fi
+PORT="${PORT:-$_port}"
 DRAFTER="${DRAFTER:-dflash2}"        # dflash2: incoai/GLM-5.3-Flash-DFlash2 drafts (CC BY-NC-ND 4.0: non-commercial
                                      # use only), +5-10% decode over mtp; mtp: the checkpoint's own MTP head
 # The checkpoint's MTP head beside DFlash2 (TensorFold's TF_GLM_MTP): auto (default) leaves it out while DFlash2
@@ -239,12 +248,14 @@ export TF_GLM_SHARED_PREFIX="$SHARED_PREFIX"
 # where PARALLEL=4 has it; the pool shrinks instead.
 _extra=$(awk -v p="$PARALLEL" -v w="${TF_GLM_MULTI_WINDOW:-32}" 'BEGIN { e = 0; if (p > 4) e += 0.95 * (p - 4);
   if (w > 32) e += 0.04 * (w - 32); printf "%.1f", e }')
-MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-$(awk -v e="$_extra" 'BEGIN { printf "%.1f", 14.5 + e }')}"
+if [[ "$TOPOLOGY" == switchless-ring ]]; then _reserve=20
+else _reserve=$(awk -v e="$_extra" 'BEGIN { printf "%.1f", 14.5 + e }'); fi
+MEMORY_RESERVE_GIB="${MEMORY_RESERVE_GIB:-$_reserve}"
 export TENSORFOLD_MEMORY_RESERVE_GIB="$MEMORY_RESERVE_GIB"
 # With more Sparks each holds fewer weights, so the pool can take more (the per-token KV cost is the same on every
 # rank: the latent cache is replicated). TP=3: 32 GiB leaves rank 0, the busiest, ~5 GiB under a 1M-token prompt
 # (at 27: 10.6 GiB lowest on rank 0, pool 5,257,216 tokens; at 32: 5,959,680).
-case "$TP" in 3) _pool=32 ;; *) _pool=12.5 ;; esac
+case "$TP" in 3) _pool=32 ;; 4) _pool=24 ;; *) _pool=12.5 ;; esac
 KV_POOL_GIB="${KV_POOL_GIB:-$_pool}"
 export TF_GLM_CACHE_GIB="$KV_POOL_GIB"
 
@@ -261,9 +272,12 @@ NFS_SERVER="${NFS_SERVER:-}"
 # The third Spark (TP=3): WORKER_WEIGHTS2 (default: WORKER_WEIGHTS) and NFS_SERVER2 (default: the head's address on
 # that worker's link); NFS_PATH and NFS_VOLUME are the same for all.
 WORKER_WEIGHTS2="${WORKER_WEIGHTS2:-}"; NFS_SERVER2="${NFS_SERVER2:-}"
+WORKER_WEIGHTS3="${WORKER_WEIGHTS3:-}"; NFS_SERVER3="${NFS_SERVER3:-}"
 NFS_VOLUME="${NFS_VOLUME:-glm53-hf}"
 KERNEL_CACHE="${KERNEL_CACHE:-$HOME/.cache/tensorfold-glm53}"   # compiled CUDA kernels, a folder per image's patches hash
-STATE_DIR="${STATE_DIR:-$HOME/.local/state/glm53-tensorfold}"   # this recipe's locks and setup marker
+if [[ "$TOPOLOGY" == switchless-ring ]]; then _state="$HOME/.local/state/glm53-tensorfold-tp4"
+else _state="$HOME/.local/state/glm53-tensorfold"; fi
+STATE_DIR="${STATE_DIR:-$_state}"   # this recipe's locks and setup marker
 # Server logs: stop.sh (and start.sh, before it removes a stopped container left from an earlier run) saves each rank's
 # container log, stdout and stderr with timestamps, gzipped, as <date>-<time>-rank<N>.log.gz in LOG_DIR here and in
 # ~/.cache/tensorfold-glm53/logs on each worker, and keeps the newest LOG_KEEP (0: saves none). docker rm deletes a
