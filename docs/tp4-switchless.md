@@ -22,6 +22,8 @@ TensorFold must run with `COMM=nccl` on this layout. MiaAI's one-shot `RoceComm`
 
 The conservative default is `SPLIT=0`; an enabled split defaults to `TF_GLM_HC_EXCHANGE=gather`. On the measured four-Spark site, `SPLIT=1` and 8192-row chunks already passed long-prompt, tool-call and decode checks. Patch 0071 lets that site set `TF_GLM_HC_EXCHANGE=ring`: each rank sends only the FP32 partials for the rows owned by the destination, forwarding the opposite-rank block through one physical neighbor. It keeps rank-order FP32 summation and uses the existing NCCL all-gather for finished BF16 rows. `ring` requires TP4, NCCL, the switchless ring and `SPLIT=1`; direct `p2p` remains refused on the ring. To roll back the exchange alone, restore `TF_GLM_HC_EXCHANGE=gather` and restart all four ranks.
 
+The measured site's subsequent [four-HCA RigMark A/B](4hca-rigmark-20261005/README.md) uses the two direct RoCE functions toward each neighbour and a separately built NCCL 2.30.7 extended-GID library. It raises 32K/64K cold prefill by about 21%/20% over a two-HCA arm using the same library. The original hardened two-GID library remains the conservative option; the extended switches in `scripts/nodes.sh` are opt-in.
+
 ## Prepare a site
 
 1. Put the same patched NCCL `libnccl.so.2` on all four machines. The library from a proven four-Spark switchless vLLM deployment can be reused; the launcher checks its SHA256 on every rank.

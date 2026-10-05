@@ -36,6 +36,11 @@ detect_links
 [[ "${NODE_HCAS[0]}" == hca0,hca1 && "${NODE_HCAS[3]}" == hca0,hca1 ]]
 [[ "$(rank_nccl_env 0)" == *'NCCL_SWITCHLESS_RING_ONLY=1'* ]]
 [[ "$(rank_nccl_env 0)" == *'NCCL_ALGO=Ring'* ]]
+[[ "$(rank_nccl_env 0)" != *'NCCL_IB_EXTENDED_IPV4_GIDS='* ]]
+NCCL_IB_EXTENDED_IPV4_GIDS=1 NCCL_IB_PRESERVE_PCI_DOMAIN=1
+[[ "$(rank_nccl_env 0)" == *'NCCL_IB_EXTENDED_IPV4_GIDS=1'* ]]
+[[ "$(rank_nccl_env 0)" == *'NCCL_IB_PRESERVE_PCI_DOMAIN=1'* ]]
+unset NCCL_IB_EXTENDED_IPV4_GIDS NCCL_IB_PRESERVE_PCI_DOMAIN
 if ( BROKEN=9; detect_links ) >/dev/null 2>&1; then
   echo 'missing 2-3 edge was accepted' >&2; exit 1
 fi
