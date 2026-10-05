@@ -1,0 +1,46 @@
+╭────────────────────────────────────────────────────────────────────────╮
+│  R I G M A R K   //   AGENT WORKLOAD RECEIPT                           │
+│  BENCHMARKS LOCAL AI HOW CODING AGENTS ACTUALLY USE IT                 │
+│  ●  3/3 BASIC OUTPUT GATES PASSED                                      │
+│  INCOMPLETE SUITE: prefill, concurrency not measured                   │
+├─ MODEL ────────────────────────────────────────────────────────────────┤
+│  glm-5.3-flash                                                         │
+├─ SINGLE STREAM ────────────────────────────────────────────────────────┤
+│  WORKLOAD         tok/s       Range tok/s   Last (s)    Checks         │
+│  CODE             107.8       107.8–107.8       17.2     ✓ 1/1         │
+│  PROSE             58.5         58.5–58.5       17.3     ✓ 1/1         │
+│  STRUCTURED*      154.0       154.0–154.0        4.9     ✓ 1/1         │
+│  * Predictable JSON ceiling; not general agent performance.            │
+│  Decode medians are estimates; rates include streamed reasoning.       │
+├─ PREFILL ──────────────────────────────────────────────────────────────┤
+│  NOT MEASURED: prefill skipped (--skip-prefill).                       │
+├─ CAPPED CONCURRENT GENERATION ─────────────────────────────────────────┤
+│  NOT MEASURED: concurrency skipped (--skip-concurrency).               │
+├─ APPLIANCE ────────────────────────────────────────────────────────────┤
+│  Hardware: 4x NVIDIA DGX Spark (GB10); all four live ranks verified    │
+│    2026-10-05                                                          │
+│  Topology: TP4; switchless RoCE ring; 4 configured RoCE HCAs per rank  │
+│    for NCCL; four live ranks                                           │
+│  Checkpoint: Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw @ 25a44fdbf168      │
+│  Quantisation: EXL3 4bpw checkpoint; dense q4 (verified from live      │
+│    container)                                                          │
+│  KV cache: fp8 (verified from live container)                          │
+│  Engine: TensorFold v0.6.0 + MiaAI patches; owner-ring 2026-10-05,     │
+│    single-direction owner-row exchange                                 │
+├─ SETTINGS ─────────────────────────────────────────────────────────────┤
+│  SUITE: CUSTOM SETTINGS                                                │
+│  Changed: --runs=1                                                     │
+│  Changed: --skip-prefill                                               │
+│  Changed: --skip-concurrency                                           │
+│  REQUEST: {"reasoning_effort": "low"}                                  │
+│  Temperature 0.0 | top_p 1.0 | seed 20260905 | protocol 1.3.0          │
+│  Decode: 1 runs, 8192-token cap | Prefill: skipped, 3 pairs            │
+│  Concurrency: skipped, 3 rounds, 256-token cap; workload code          │
+│  Cache isolation: random-salt-per-pair                                 │
+│  Comparison ID: glm53-rows2048-gate-20261006                           │
+├─ RECEIPT ──────────────────────────────────────────────────────────────┤
+│  SOURCE     git:68800bf29cf1  •  state unknown                         │
+│  JSON sha256:662c337d97b94ca2…                                         │
+│  SHARE THE CARD • LINK THE JSON RECEIPT • #RIGMARK                     │
+│  github.com/alexellis/rigmark                                          │
+╰────────────────────────────────────────────────────────────────────────╯

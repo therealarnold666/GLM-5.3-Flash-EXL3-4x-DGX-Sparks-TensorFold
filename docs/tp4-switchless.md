@@ -24,6 +24,8 @@ The conservative default is `SPLIT=0`; an enabled split defaults to `TF_GLM_HC_E
 
 The measured site's subsequent [four-HCA RigMark A/B](4hca-rigmark-20261005/README.md) uses the two direct RoCE functions toward each neighbour and a separately built NCCL 2.30.7 extended-GID library. It raises 32K/64K cold prefill by about 21%/20% over a two-HCA arm using the same library. The original hardened two-GID library remains the conservative option; the extended switches in `scripts/nodes.sh` are opt-in.
 
+For this same measured site, [mixed-load tuning](fill-budget-20261006/README.md) kept the single-direction owner-row route and raised `TF_GLM_FILL_ROWS` from 1024 to 2048 in the head's untracked `scripts/local.sh`. With three decodes active, 32K/64K cold prefill TTFT improved by about 10% in three matched trials per depth; decode SSE-gap p95 rose by 2.5–3.1 ms. The generic default remains 1024 rows for other sites.
+
 ## Prepare a site
 
 1. Put the same patched NCCL `libnccl.so.2` on all four machines. The library from a proven four-Spark switchless vLLM deployment can be reused; the launcher checks its SHA256 on every rank.

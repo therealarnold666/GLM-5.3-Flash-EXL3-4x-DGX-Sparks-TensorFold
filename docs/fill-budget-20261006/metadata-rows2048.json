@@ -1,0 +1,15 @@
+{
+  "hardware": "4x NVIDIA DGX Spark (GB10); all four live ranks verified 2026-10-05",
+  "topology": "TP4; switchless RoCE ring; 4 configured RoCE HCAs per rank for NCCL; four live ranks",
+  "negotiated_link_speed": "not remeasured for this run",
+  "model": "Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw",
+  "model_revision": "25a44fdbf16862a46b7cc9921142c6c81350af2f (verified from rank-0 command)",
+  "quantisation": "EXL3 4bpw checkpoint; dense q4 (verified from live container)",
+  "kv_cache_dtype": "fp8 (verified from live container)",
+  "serving_engine": "TensorFold v0.6.0 + MiaAI patches; owner-ring 2026-10-05, single-direction owner-row exchange",
+  "serving_image": "tensorfold-glm53:owner-ring-20261005 (same image as baseline; only TF_GLM_FILL_ROWS changes)",
+  "drafter": "DFlash2 revision dc77ff1c99eeb2df044ee3d4f0094eb033fee410; fnc7:0.3 + copy drafts",
+  "context_limit": 1048576,
+  "scheduler": "PARALLEL=4, TP4, SPLIT=1, TF_GLM_PREFILL_ROWS=8192, TF_GLM_FILL_ROWS=2048, TF_GLM_FILL_BUDGET_MS=200, TF_GLM_FILL_DRAFTS=1, 4HCA, FP8 KV",
+  "competing_traffic": "None during this verification; assert health request-count delta matches benchmark requests"
+}

@@ -1,0 +1,41 @@
+{
+  "requests_delta": 4,
+  "multi_prefill_before": {
+    "chunks": 4,
+    "pieces": 10,
+    "rows": 2560
+  },
+  "multi_prefill_after": {
+    "chunks": 5,
+    "pieces": 12,
+    "rows": 3072
+  },
+  "fills": [
+    {
+      "prompt_tokens": 8192,
+      "cached_tokens": 0,
+      "completion_tokens": 8,
+      "events": 2,
+      "finish_reason": "length"
+    },
+    {
+      "prompt_tokens": 8192,
+      "cached_tokens": 0,
+      "completion_tokens": 8,
+      "events": 2,
+      "finish_reason": "length"
+    }
+  ],
+  "decodes": [
+    {
+      "completion_tokens": 1024,
+      "events": 1023,
+      "finish_reason": "length"
+    },
+    {
+      "completion_tokens": 1024,
+      "events": 1021,
+      "finish_reason": "length"
+    }
+  ]
+}
