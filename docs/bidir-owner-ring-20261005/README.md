@@ -99,3 +99,7 @@ The A/B was one controlled serving run per arm, so sub-percent differences
 are observations rather than reliable gains or regressions. Production was
 restored to the prior image and local settings, with a successful `OK` smoke
 reply after restart.
+
+A subsequent [three-decode-plus-cold-prefill mixed-load A/B](mixed-load.md)
+also found no reliable serving gain. The original production image and
+watchdog were restored after that test.
