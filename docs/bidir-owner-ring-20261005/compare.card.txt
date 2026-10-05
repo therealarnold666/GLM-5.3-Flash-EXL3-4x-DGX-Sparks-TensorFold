@@ -1,0 +1,25 @@
+╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗
+║ R I G M A R K  //  MATCHED REQUEST A/B  //  REAL OUTPUT. RECEIPTS INCLUDED.                          ║
+║ SAME PROTOCOL • PROMPTS • REQUEST BODY • GENERATION LIMITS                                           ║
+║ TOK/S RATIOS REQUIRE MATCHING SERVER-SIDE TOKEN DEFINITIONS                                          ║
+╠══════════════════════════════════════════════════════════════════════════════════════════════════════╣
+║ LEFT   glm53-owner-bidir-mode0-20261006                                                              ║
+║ RIGHT  glm53-owner-bidir-mode1-20261006                                                              ║
+║ BENCH  left git:68800bf29cf1 unknown                                                                 ║
+║        right git:68800bf29cf1 unknown                                                                ║
+╠══════════════════════════════════════════════════════════════════════════════════════════════════════╣
+║ METRIC                             LEFT               RIGHT    RIGHT/LEFT                            ║
+║ CODE DECODE EST.                  109.3               109.1         1.00×                            ║
+║ CODE LAST OUTPUT, SEC ↓            18.6                18.7         1.00×                            ║
+║ PROSE DECODE EST.                  60.9                60.8         1.00×                            ║
+║ PROSE LAST OUTPUT, SEC ↓           16.5                16.5         1.00×                            ║
+║ STRUCTURED CEILING                154.4               153.5         0.99×                            ║
+║ 64K COLD PREFILL                2,252.6             2,241.4         1.00×                            ║
+║ 64K IMMEDIATE REPLAY          479,446.3           484,508.0         1.01×                            ║
+║ C4 CAPPED CODE LOAD               158.2               159.3         1.01×                            ║
+╠══════════════════════════════════════════════════════════════════════════════════════════════════════╣
+║ BASIC GATES  left 15/15  •  right 15/15                                                              ║
+║ RECEIPTS  3c5799aab79cd008…  •  f7e52cf78f51b7c5…                                                    ║
+║ SCREENSHOT → POST TO X • LINK BOTH JSON RECEIPTS • #RigMark                                          ║
+║ github.com/alexellis/rigmark                                                                         ║
+╚══════════════════════════════════════════════════════════════════════════════════════════════════════╝

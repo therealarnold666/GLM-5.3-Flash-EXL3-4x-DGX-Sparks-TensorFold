@@ -24,6 +24,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=4096)
     parser.add_argument("--iterations", type=int, default=90)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--reverse", action="store_true", help="measure the modes in reverse order")
     args = parser.parse_args()
     rank = args.rank
     world = 4
@@ -39,6 +40,8 @@ def main() -> None:
     from_next = torch.empty_like(part[0])
     forward_from_prev = torch.empty_like(part[0])
     from_opp = torch.empty_like(part[0])
+    bidir_forward = torch.empty_like(part[0])
+    bidir_from_opp = torch.empty_like(part[0])
     lib = nccl.lib
     stream = torch.cuda.current_stream().cuda_stream
     datatype = _DTYPES[torch.float32]
@@ -71,9 +74,20 @@ def main() -> None:
         # rank. Every send/receive here touches a physically adjacent rank.
         group(((send, forward_from_prev, nxt), (recv, from_opp, prev)))
 
+    def owner_ring_bidirectional() -> None:
+        # Even ranks route the opposite block clockwise; odd ranks route it
+        # counterclockwise. Each rank then sends two blocks over each edge.
+        relay = nxt if rank % 2 == 0 else prev
+        other = prev if rank % 2 == 0 else nxt
+        group(((send, part[nxt], nxt), (send, part[prev], prev),
+               (send, part[opp], relay), (recv, from_prev, prev),
+               (recv, from_next, nxt), (recv, bidir_forward, relay)))
+        group(((send, bidir_forward, other), (recv, bidir_from_opp, other)))
+
     torch.cuda.synchronize()
     gather()
     owner_ring()
+    owner_ring_bidirectional()
     torch.cuda.synchronize()
     for origin in range(world):
         assert full[origin, rank, 0, 0].item() == origin * 10 + rank
@@ -81,6 +95,8 @@ def main() -> None:
     for origin, tensor in ((prev, from_prev), (nxt, from_next), (opp, from_opp)):
         assert tensor[0, 0].item() == origin * 10 + rank
         assert tensor[-1, -1].item() == origin * 10 + rank
+    for origin, tensor in ((prev, from_prev), (nxt, from_next), (opp, bidir_from_opp)):
+        assert torch.equal(tensor, full[origin, rank])
     nccl.barrier()
 
     def measure(label: str, fn) -> dict:
@@ -104,12 +120,16 @@ def main() -> None:
                 "median_cuda_ms_per_exchange": statistics.median(s["cuda_ms"] for s in samples) / args.iterations,
                 "median_wall_ms_per_exchange": statistics.median(s["wall_ms"] for s in samples) / args.iterations}
 
+    modes = [("full_fp32_all_gather", gather), ("owner_rows_neighbor_forward", owner_ring),
+             ("owner_rows_bidirectional", owner_ring_bidirectional)]
+    if args.reverse:
+        modes.reverse()
     output = {"rank": rank, "rows": args.rows, "width": args.width, "world": world,
               "fp32_partial_mib": part.numel() * part.element_size() / 1048576,
               "owner_block_mib": part[0].numel() * part[0].element_size() / 1048576,
-              "iterations": args.iterations, "repeats": args.repeats,
+              "iterations": args.iterations, "repeats": args.repeats, "reverse": args.reverse,
               "correctness": "passed",
-              "results": [measure("full_fp32_all_gather", gather), measure("owner_rows_neighbor_forward", owner_ring)]}
+              "results": [measure(name, fn) for name, fn in modes]}
     print("ROWBENCH_RESULT=" + json.dumps(output, sort_keys=True), flush=True)
     nccl.barrier()
 

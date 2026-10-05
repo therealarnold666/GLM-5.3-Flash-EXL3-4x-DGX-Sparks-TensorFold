@@ -1,0 +1,93 @@
+decode/code: 5 runs
+  1: 108.7 tok/s, TTFT 0.505s, 2031 tokens
+  2: 109.5 tok/s, TTFT 0.338s, 1776 tokens
+  3: 108.9 tok/s, TTFT 0.471s, 2158 tokens
+  4: 110.0 tok/s, TTFT 0.454s, 1971 tokens
+  5: 109.1 tok/s, TTFT 0.391s, 1994 tokens
+decode/prose: 5 runs
+  1: 61.0 tok/s, TTFT 0.346s, 988 tokens
+  2: 60.1 tok/s, TTFT 0.398s, 986 tokens
+  3: 60.8 tok/s, TTFT 0.351s, 1068 tokens
+  4: 60.9 tok/s, TTFT 0.406s, 966 tokens
+  5: 60.1 tok/s, TTFT 0.401s, 922 tokens
+decode/structured: 5 runs
+  1: 152.5 tok/s, TTFT 0.392s, 691 tokens
+  2: 151.7 tok/s, TTFT 0.368s, 437 tokens
+  3: 154.1 tok/s, TTFT 0.445s, 687 tokens
+  4: 153.5 tok/s, TTFT 0.543s, 687 tokens
+  5: 155.3 tok/s, TTFT 0.369s, 687 tokens
+prefill/8192: 3 cold/immediate-replay pairs
+  1: cold 2240.0 tok/s (3.657s), warm 48997.9 tok/s (0.167s)
+  2: cold 2250.6 tok/s (3.640s), warm 41882.9 tok/s (0.196s)
+  3: cold 2248.0 tok/s (3.644s), warm 67024.5 tok/s (0.122s)
+prefill/32768: 3 cold/immediate-replay pairs
+  1: cold 2309.4 tok/s (14.189s), warm 337258.1 tok/s (0.097s)
+  2: cold 2290.2 tok/s (14.308s), warm 220662.9 tok/s (0.148s)
+  3: cold 2308.9 tok/s (14.192s), warm 216220.5 tok/s (0.152s)
+prefill/65536: 3 cold/immediate-replay pairs
+  1: cold 2241.4 tok/s (29.239s), warm 502006.9 tok/s (0.131s)
+  2: cold 2240.1 tok/s (29.255s), warm 441156.5 tok/s (0.149s)
+  3: cold 2242.9 tok/s (29.219s), warm 484508.0 tok/s (0.135s)
+concurrency/1: 3 rounds of code
+  1: aggregate 76.4 tok/s, median stream 86.2 tok/s
+  2: aggregate 74.8 tok/s, median stream 84.6 tok/s
+  3: aggregate 74.1 tok/s, median stream 83.7 tok/s
+concurrency/2: 3 rounds of code
+  1: aggregate 109.8 tok/s, median stream 65.9 tok/s
+  2: aggregate 114.6 tok/s, median stream 62.9 tok/s
+  3: aggregate 108.3 tok/s, median stream 60.9 tok/s
+concurrency/4: 3 rounds of code
+  1: aggregate 162.0 tok/s, median stream 45.7 tok/s
+  2: aggregate 159.3 tok/s, median stream 45.9 tok/s
+  3: aggregate 156.4 tok/s, median stream 44.0 tok/s
+result: work/GLM-5.3-Flash-EXL3-4x-DGX-Sparks-TensorFold/docs/bidir-owner-ring-20261005/rigmark-mode1.json
+card: work/GLM-5.3-Flash-EXL3-4x-DGX-Sparks-TensorFold/docs/bidir-owner-ring-20261005/rigmark-mode1.card.txt
+
+╭────────────────────────────────────────────────────────────────────────╮
+│  R I G M A R K   //   AGENT WORKLOAD RECEIPT                           │
+│  BENCHMARKS LOCAL AI HOW CODING AGENTS ACTUALLY USE IT                 │
+│  ●  15/15 BASIC OUTPUT GATES PASSED                                    │
+├─ MODEL ────────────────────────────────────────────────────────────────┤
+│  glm-5.3-flash                                                         │
+├─ SINGLE STREAM ────────────────────────────────────────────────────────┤
+│  WORKLOAD         tok/s       Range tok/s   Last (s)    Checks         │
+│  CODE             109.1       108.7–110.0       18.7     ✓ 5/5         │
+│  PROSE             60.8         60.1–61.0       16.5     ✓ 5/5         │
+│  STRUCTURED*      153.5       151.7–155.3        4.9     ✓ 5/5         │
+│  * Predictable JSON ceiling; not general agent performance.            │
+│  Decode medians are estimates; rates include streamed reasoning.       │
+├─ PREFILL ──────────────────────────────────────────────────────────────┤
+│  DEPTH       Cold tok/s      Cold TTFT (s)    Replay TTFT (s)          │
+│  8K               2,248               3.64               0.17          │
+│  32K              2,309              14.19               0.15          │
+│  64K              2,241              29.24               0.14          │
+│  Medians; replay is an immediate repeat, not a proven hit.             │
+├─ CAPPED CONCURRENT GENERATION ─────────────────────────────────────────┤
+│  Aggregate tok/s: C1 74.8 | C2 109.8 | C4 159.3                        │
+│  C4: 0/12 normal stops; 12/12 with visible output.                     │
+│  Capped throughput includes reasoning; not completed agent tasks.      │
+├─ APPLIANCE ────────────────────────────────────────────────────────────┤
+│  Hardware: 4x NVIDIA DGX Spark (GB10); all four live ranks verified    │
+│    2026-10-05                                                          │
+│  Topology: TP4; switchless RoCE ring; 4 configured RoCE HCAs per rank  │
+│    for NCCL; four live ranks                                           │
+│  Checkpoint: Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw @ 25a44fdbf168      │
+│  Quantisation: EXL3 4bpw checkpoint; dense q4 (verified from live      │
+│    container)                                                          │
+│  KV cache: fp8 (verified from live container)                          │
+│  Engine: TensorFold v0.6.0 + MiaAI patches; owner-ring 2026-10-05 plus │
+│    opt-in bidirectional relay patch 0072                               │
+├─ SETTINGS ─────────────────────────────────────────────────────────────┤
+│  SUITE: DEFAULT SETTINGS                                               │
+│  REQUEST: {"chat_template_kwargs": {"reasoning_effort": "low"}}        │
+│  Temperature 0.0 | top_p 1.0 | seed 20260905 | protocol 1.3.0          │
+│  Decode: 5 runs, 8192-token cap | Prefill: 8K/32K/64K, 3 pairs         │
+│  Concurrency: C1/C2/C4, 3 rounds, 256-token cap; workload code         │
+│  Cache isolation: random-salt-per-pair                                 │
+│  Comparison ID: spark-glm53-owner-bidir-20261006                       │
+├─ RECEIPT ──────────────────────────────────────────────────────────────┤
+│  SOURCE     git:68800bf29cf1  •  state unknown                         │
+│  JSON sha256:f7e52cf78f51b7c5…                                         │
+│  SHARE THE CARD • LINK THE JSON RECEIPT • #RIGMARK                     │
+│  github.com/alexellis/rigmark                                          │
+╰────────────────────────────────────────────────────────────────────────╯

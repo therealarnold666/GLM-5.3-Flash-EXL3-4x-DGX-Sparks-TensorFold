@@ -1,0 +1,46 @@
+diff --git tensorfold/cuda/comm.py tensorfold/cuda/comm.py
+--- tensorfold/cuda/comm.py
++++ tensorfold/cuda/comm.py
+@@ -40,6 +40,10 @@
+         from torch.distributed import TCPStore
+ 
+         self.rank, self.world = rank, world
++        mode = os.environ.get("TF_GLM_OWNER_BIDIR", "0").strip()
++        if mode not in ("0", "1"):
++            raise ValueError("TF_GLM_OWNER_BIDIR must be 0 or 1")
++        self.owner_ring_bidirectional = mode == "1"
+         self.lib = _library()
+         lib = self.lib
+         lib.ncclGetErrorString.restype = ctypes.c_char_p
+@@ -174,6 +178,31 @@
+         def recv(t: torch.Tensor, peer: int) -> None:
+             self._check(lib.ncclRecv(t.data_ptr(), count, dtype, peer, self.comm, stream))
+ 
++        if self.owner_ring_bidirectional:
++            # The even ranks relay opposite-owner blocks clockwise and the odd
++            # ranks counterclockwise. Each rank sends one direct block and one
++            # opposite block to its relay, then forwards the received opposite
++            # block over the other edge: two blocks in each direction.
++            relay = nxt if self.rank % 2 == 0 else prev
++            other = prev if self.rank % 2 == 0 else nxt
++            self._check(lib.ncclGroupStart())
++            try:
++                send(partials[nxt], nxt)
++                send(partials[prev], prev)
++                send(partials[opp], relay)
++                recv(owners[prev], prev)
++                recv(owners[nxt], nxt)
++                recv(forward, relay)
++            finally:
++                self._check(lib.ncclGroupEnd())
++            self._check(lib.ncclGroupStart())
++            try:
++                send(forward, other)
++                recv(owners[opp], other)
++            finally:
++                self._check(lib.ncclGroupEnd())
++            return
++
+         self._check(lib.ncclGroupStart())
+         try:
+             send(partials[nxt], nxt)

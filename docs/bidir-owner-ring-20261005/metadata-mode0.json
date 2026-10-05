@@ -1,0 +1,15 @@
+{
+  "hardware": "4x NVIDIA DGX Spark (GB10); all four live ranks verified 2026-10-05",
+  "topology": "TP4; switchless RoCE ring; 4 configured RoCE HCAs per rank for NCCL; four live ranks",
+  "negotiated_link_speed": "not remeasured for this run",
+  "model": "Mia-AiLab/GLM-5.3-Flash-EXL3-TR3-4bpw",
+  "model_revision": "25a44fdbf16862a46b7cc9921142c6c81350af2f (verified from rank-0 command)",
+  "quantisation": "EXL3 4bpw checkpoint; dense q4 (verified from live container)",
+  "kv_cache_dtype": "fp8 (verified from live container)",
+  "serving_engine": "TensorFold v0.6.0 + MiaAI patches; owner-ring 2026-10-05 plus opt-in bidirectional relay patch 0072",
+  "serving_image": "tensorfold-glm53:owner-ring-bidir-20261005; tensorfold/cuda/comm.py sha256 017e822f494a6a380c5b8b51772a117afc7118dfd6f44763d2f93bec94396717 on all four ranks",
+  "drafter": "DFlash2 revision dc77ff1c99eeb2df044ee3d4f0094eb033fee410; fnc7:0.3 + copy drafts",
+  "context_limit": 1048576,
+  "scheduler": "PARALLEL=4, TF_GLM_MULTI_WINDOW=32, TF_GLM_PREFILL_ROWS=8192, HC_SPLIT=1, HC_EXCHANGE=ring, PREFILL_OVERLAP=2, FILL_BUDGET_MS=200, TF_GLM_OWNER_BIDIR=0",
+  "competing_traffic": "Hermes and other clients paused by user; verify health request-count delta equals RigMark request count"
+}
