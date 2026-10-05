@@ -1,0 +1,11 @@
+# Build on each Spark that already has the qualified v0.6.0 image.
+# Context: patches/; Dockerfile: deploy/Dockerfile.owner-ring-incremental.
+# The older image stays available under its original tag for rollback.
+ARG BASE_IMAGE=tensorfold-glm53:v0.6.0
+FROM ${BASE_IMAGE}
+COPY 0071-glm-tp4-owner-ring.patch /tmp/0071-glm-tp4-owner-ring.patch
+RUN cd /usr/local/lib/python3.12/dist-packages && \
+    patch -p0 --forward < /tmp/0071-glm-tp4-owner-ring.patch && \
+    python3 -c 'from tensorfold.cuda.comm import NCCL; from tensorfold.families.glm5_next.cuda.hcsplit import EXCHANGES; assert "ring" in EXCHANGES and hasattr(NCCL, "exchange_owner_ring")'
+ARG PATCHES_HASH
+LABEL tf.patches=${PATCHES_HASH}

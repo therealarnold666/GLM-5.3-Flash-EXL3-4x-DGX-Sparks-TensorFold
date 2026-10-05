@@ -1,0 +1,35 @@
+{
+  "elapsed_s": 70.80215728498297,
+  "fill_s": 25.001501268998254,
+  "fill_prompt_tokens": 31448,
+  "fill_cached_tokens": 0,
+  "streams": [
+    {
+      "stream": 0,
+      "events": 2043,
+      "chars": 8252,
+      "finish": "length",
+      "events_during_fill": 248,
+      "max_gap_during_fill_s": 0.20077388500794768,
+      "p90_gap_during_fill_s": 0.13433428198914044
+    },
+    {
+      "stream": 1,
+      "events": 2043,
+      "chars": 8574,
+      "finish": "length",
+      "events_during_fill": 241,
+      "max_gap_during_fill_s": 0.20135897499858402,
+      "p90_gap_during_fill_s": 0.1455929790099617
+    },
+    {
+      "stream": 2,
+      "events": 2048,
+      "chars": 8934,
+      "finish": "length",
+      "events_during_fill": 246,
+      "max_gap_during_fill_s": 0.201463915000204,
+      "p90_gap_during_fill_s": 0.13456336499075405
+    }
+  ]
+}

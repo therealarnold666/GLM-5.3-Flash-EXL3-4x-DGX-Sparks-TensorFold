@@ -165,8 +165,9 @@ export TF_GLM_DFLASH_POLICY="$DRAFT_POLICY"
 # rows' work (patch 0010): prefill ~1,270 -> ~1,730 tok/s on a 50k prompt (with patches 0009 and 0020); decode rounds
 # pay ~1.5%. The overlap also runs the next block's front on its own rows during the exchanges (patch 0033; with
 # COPY_CODE below, two boots each: a 149k prompt 92.8 -> 90.7 s). Same bits. SPLIT=0 turns it off.
-# A switchless ring has no rank 0-2 or 1-3 P2P path. Its split warm-up opens a direct connection to every rank,
-# so keep the split off by default. If enabled, use the TP-N split's NCCL all-gathers, which follow the physical ring.
+# A switchless ring has no rank 0-2 or 1-3 direct P2P path. The conservative default remains full NCCL gather.
+# TP4 sites can opt into "ring": owner-row FP32 blocks go only over physical neighbor links, with one forwarding hop
+# for the opposite rank; completed BF16 rows still use NCCL all-gather. Keep the fallback until same-model A/B passes.
 if [[ "$TOPOLOGY" == switchless-ring ]]; then _split=0; _exchange=gather; else _split=1; _exchange=p2p; fi
 SPLIT="${SPLIT:-$_split}"
 export TF_GLM_HC_EXCHANGE="${TF_GLM_HC_EXCHANGE:-$_exchange}"

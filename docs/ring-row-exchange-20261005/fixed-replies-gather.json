@@ -1,0 +1,22 @@
+[
+  {
+    "task": "prose",
+    "prompt_tokens": 7874,
+    "completion_tokens": 13,
+    "content_sha256": "dd4d79786716bf2be3bbe7f9920b3465f3a48eafb65da55acad6b6270bc90657",
+    "finish_reason": "stop",
+    "elapsed_s": 5.756,
+    "prefill_s": 5.5214,
+    "decode_s": 0.1761
+  },
+  {
+    "task": "code",
+    "prompt_tokens": 6740,
+    "completion_tokens": 256,
+    "content_sha256": "fed412381057f93701eb95bb4e911f82f1ec0d02da05f5dd66916ac238d289f5",
+    "finish_reason": "length",
+    "elapsed_s": 7.848,
+    "prefill_s": 4.8178,
+    "decode_s": 2.9479
+  }
+]

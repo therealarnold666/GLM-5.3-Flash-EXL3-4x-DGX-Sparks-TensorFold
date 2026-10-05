@@ -60,6 +60,11 @@ cp scripts/config.sh "$tmp_cfg/scripts/config.sh"
   [[ "$(env | sed -n 's/^TF_GLM_HC_EXCHANGE=//p')" == gather ]]
 )
 (
+  SPLIT=1 TF_GLM_HC_EXCHANGE=ring
+  source "$tmp_cfg/scripts/config.sh"
+  [[ "$SPLIT" == 1 && "$TF_GLM_HC_EXCHANGE" == ring && "$TF_GLM_PREFILL_OVERLAP" == 2 ]]
+)
+(
   TOPOLOGY=full-mesh
   source "$tmp_cfg/scripts/config.sh"
   [[ "$SPLIT" == 1 && "$TF_GLM_HC_EXCHANGE" == p2p ]]
