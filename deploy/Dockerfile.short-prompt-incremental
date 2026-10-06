@@ -1,0 +1,9 @@
+# Apply patch 0072 to an already qualified owner-ring image on each Spark.
+ARG BASE_IMAGE=tensorfold-glm53:owner-ring-20261005
+FROM ${BASE_IMAGE}
+COPY 0072-glm-short-prompt-priority.patch /tmp/0072-glm-short-prompt-priority.patch
+RUN cd /usr/local/lib/python3.12/dist-packages && \
+    patch -p0 --forward < /tmp/0072-glm-short-prompt-priority.patch && \
+    python3 -c 'from tensorfold.families.glm5_next.cuda.multi import short_prompt_rows; assert short_prompt_rows(8192, "512") == 512'
+ARG PATCHES_HASH
+LABEL tf.patches=${PATCHES_HASH}

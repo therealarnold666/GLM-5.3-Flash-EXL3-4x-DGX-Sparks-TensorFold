@@ -1,0 +1,77 @@
+{
+  "scenario": "new 32768-token cold prefill starts 0.5s before 256-token code request; three repetitions; separate solo short baseline",
+  "checkpoint": "local ablit snapshot, same as baseline",
+  "scheduler": "TF_GLM_SHORT_PROMPT_ROWS=512; patch 0072 v2",
+  "baseline_short": {
+    "ttft_seconds": 0.391852,
+    "time_to_first_visible_seconds": 1.027887,
+    "decode_tokens_per_second": 79.743,
+    "prompt_tokens": 118,
+    "completion_tokens": 256,
+    "cached_prompt_tokens": 0,
+    "wall_seconds": 3.591024,
+    "output_sha256": "618ea061935190f083e0c11d7585ac0fda6cb23dfd78cc14ea169da45e823772"
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "short_during_long": {
+        "ttft_seconds": 4.344326,
+        "time_to_first_visible_seconds": 4.344326,
+        "decode_tokens_per_second": 17.851,
+        "prompt_tokens": 120,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 18.635324,
+        "output_sha256": "af1829de8f2ea6c8b5a196006f25cf31fd9fd0ba621a6813ea3200050b8cfc0f"
+      },
+      "long_cold": {
+        "ttft_seconds": 18.070124,
+        "effective_prefill_tokens_per_second": 1813.38,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 18.141556
+      }
+    },
+    {
+      "round": 2,
+      "short_during_long": {
+        "ttft_seconds": 3.586094,
+        "time_to_first_visible_seconds": 6.17398,
+        "decode_tokens_per_second": 17.698,
+        "prompt_tokens": 119,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.994889,
+        "output_sha256": "9c35e73ccd43dbe3c877e27500c87ace3b450d9e3db11076f61f28a34c3ba06b"
+      },
+      "long_cold": {
+        "ttft_seconds": 17.450839,
+        "effective_prefill_tokens_per_second": 1877.732,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.516809
+      }
+    },
+    {
+      "round": 3,
+      "short_during_long": {
+        "ttft_seconds": 3.766726,
+        "time_to_first_visible_seconds": 3.766726,
+        "decode_tokens_per_second": 18.062,
+        "prompt_tokens": 121,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.885787,
+        "output_sha256": "cda63ed3e039a1fce5b83c0d37117ab46dc1e66fc8075ebd1f3b3fb0fe51124a"
+      },
+      "long_cold": {
+        "ttft_seconds": 17.459304,
+        "effective_prefill_tokens_per_second": 1876.822,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.537598
+      }
+    }
+  ]
+}

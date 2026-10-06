@@ -1,0 +1,54 @@
+--- tensorfold/families/glm5_next/cuda/multi.py
++++ tensorfold/families/glm5_next/cuda/multi.py
+@@ -153,6 +153,18 @@
+     return rows
+ 
+ 
++def short_prompt_rows(prefill_rows: int, value: str | None = None) -> int:
++    """TF_GLM_SHORT_PROMPT_ROWS: prioritize a newly admitted short prompt at a chunk boundary; 0 (default) keeps
++    FIFO/grouped prefill. The current GPU forward is never interrupted and a long prompt resumes next iteration."""
++
++    value = os.environ.get("TF_GLM_SHORT_PROMPT_ROWS", "") if value is None else value
++    value = value.strip() or "0"
++    rows = int(value) if value.isdecimal() else -1
++    if rows < 0 or rows > prefill_rows:
++        raise ValueError(f"TF_GLM_SHORT_PROMPT_ROWS: 0 to {prefill_rows}, not {value!r}")
++    return rows
++
++
+ def fill_unit(grid: int) -> int:
+     """Rows a prompt chunk cut short of a stream's next stop comes in multiples of (a multi-prompt chunk's share of
+     the row budget): 64 and the prompt grid (as TF_GLM_FILL_ROWS), so every cut stays on the grid."""
+@@ -411,6 +423,7 @@
+         self.arena = e.caches.arena
+         self.grid = engine.grid
+         self.fill_rows = fill_rows(e.prefill_rows, self.grid)
++        self.short_prompt_rows = short_prompt_rows(e.prefill_rows)
+         self.fill_budget = sliced_fill.budget_ms()
+         self.fill_drafts = sliced_fill.drafted_rounds()     # rank 0 decides; the ROUND message carries it
+         self.partial = None
+@@ -1084,6 +1097,11 @@
+             if self.credit < 1:
+                 return None
+             self.credit -= 1
++        if self.short_prompt_rows and self.partial is None:
++            ready = [l for l in filling if not l.s.background and l.feed is None and l.head is None
++                     and len(l.s.prompt) - l.st.pos <= self.short_prompt_rows]
++            if ready:
++                return min(ready, key=lambda l: (len(l.s.prompt) - l.st.pos, l.order))
+         s = next_fill([l.s for l in filling])
+         return self.lanes[s.sid]
+ 
+@@ -1298,6 +1316,12 @@
+ 
+         if not plain(first):
+             return None
++        # A small later request should finish before an older long prompt's next large grouped forward. Keeping
++        # it in that group delays its first token until every member's rows have traversed all layers.
++        if (self.short_prompt_rows and len(first.s.prompt) - first.st.pos <= self.short_prompt_rows
++                and any(l is not first and plain(l)
++                        and len(l.s.prompt) - l.st.pos > self.short_prompt_rows for l in self.lanes.values())):
++            return None
+         busy = any(l.decoding and not l.s.done for l in self.lanes.values())
+         left = self.fill_rows if busy else self.e.prefill_rows
+         lanes = sorted((l for l in self.lanes.values() if plain(l)),

@@ -1,0 +1,71 @@
+{
+  "scenario": "new 32768-token cold prefill starts 0.5s before 256-token code request; three repetitions; separate solo short baseline",
+  "baseline_short": {
+    "ttft_seconds": 0.387778,
+    "time_to_first_visible_seconds": 1.02517,
+    "decode_tokens_per_second": 79.254,
+    "prompt_tokens": 120,
+    "completion_tokens": 256,
+    "cached_prompt_tokens": 0,
+    "wall_seconds": 3.60679
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "short_during_long": {
+        "ttft_seconds": 10.240978,
+        "time_to_first_visible_seconds": 12.997679,
+        "decode_tokens_per_second": 36.205,
+        "prompt_tokens": 119,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.285735
+      },
+      "long_cold": {
+        "ttft_seconds": 15.246906,
+        "effective_prefill_tokens_per_second": 2149.157,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 15.313911
+      }
+    },
+    {
+      "round": 2,
+      "short_during_long": {
+        "ttft_seconds": 10.411774,
+        "time_to_first_visible_seconds": 10.411774,
+        "decode_tokens_per_second": 37.56,
+        "prompt_tokens": 120,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.202677
+      },
+      "long_cold": {
+        "ttft_seconds": 15.327846,
+        "effective_prefill_tokens_per_second": 2137.809,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 15.455146
+      }
+    },
+    {
+      "round": 3,
+      "short_during_long": {
+        "ttft_seconds": 10.208665,
+        "time_to_first_visible_seconds": 11.428503,
+        "decode_tokens_per_second": 36.688,
+        "prompt_tokens": 121,
+        "completion_tokens": 256,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 17.159251
+      },
+      "long_cold": {
+        "ttft_seconds": 15.304766,
+        "effective_prefill_tokens_per_second": 2141.032,
+        "prompt_tokens": 32768,
+        "cached_prompt_tokens": 0,
+        "wall_seconds": 15.378695
+      }
+    }
+  ]
+}

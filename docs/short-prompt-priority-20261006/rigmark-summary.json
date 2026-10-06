@@ -1,0 +1,108 @@
+{
+  "protocol": "RigMark 1.3.0; same request settings and locally verified Ablit checkpoint; prior baseline JSON metadata mislabeled TR3",
+  "baseline_json_sha256": "ce2665ccb3d6a90b7f70ba8ca91250642042c9d0954948ba05d1582bbaa04947",
+  "candidate_json_sha256": "53ccb0bb5043b3734c3390a10206dd4a740ae763e1a9f1adea0926b1ff3b0cd2",
+  "baseline": {
+    "decode_median_tok_s": {
+      "code": 109.171,
+      "prose": 57.836,
+      "structured": 154.044
+    },
+    "cold_prefill_median_tok_s": {
+      "8192": 2251.065,
+      "32768": 2321.424,
+      "65536": 2263.056
+    },
+    "cold_ttft_s": {
+      "8192": 3.639,
+      "32768": 14.115,
+      "65536": 28.959
+    },
+    "concurrency_aggregate_median_tok_s": {
+      "1": 72.333,
+      "2": 105.611,
+      "4": 143.939
+    },
+    "concurrency_ttft_median_s": {
+      "1": 0.424,
+      "2": 0.707,
+      "4": 0.665
+    },
+    "cold_cache_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "warm_cache_counts": [
+      8192,
+      8192,
+      8192,
+      32768,
+      32768,
+      32768,
+      65536,
+      65536,
+      65536
+    ]
+  },
+  "candidate_v2": {
+    "decode_median_tok_s": {
+      "code": 108.903,
+      "prose": 57.388,
+      "structured": 153.563
+    },
+    "cold_prefill_median_tok_s": {
+      "8192": 2247.103,
+      "32768": 2320.813,
+      "65536": 2242.159
+    },
+    "cold_ttft_s": {
+      "8192": 3.646,
+      "32768": 14.119,
+      "65536": 29.229
+    },
+    "concurrency_aggregate_median_tok_s": {
+      "1": 72.375,
+      "2": 104.822,
+      "4": 141.407
+    },
+    "concurrency_ttft_median_s": {
+      "1": 0.388,
+      "2": 0.642,
+      "4": 0.872
+    },
+    "cold_cache_counts": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "warm_cache_counts": [
+      8192,
+      8192,
+      8192,
+      32768,
+      32768,
+      32768,
+      65536,
+      65536,
+      65536
+    ]
+  },
+  "paired_decode_output_hash_matches": {
+    "code": 5,
+    "prose": 5,
+    "structured": 5
+  }
+}

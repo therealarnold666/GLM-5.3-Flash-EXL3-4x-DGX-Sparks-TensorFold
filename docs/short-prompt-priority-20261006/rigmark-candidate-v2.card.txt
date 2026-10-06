@@ -1,0 +1,49 @@
+╭────────────────────────────────────────────────────────────────────────╮
+│  R I G M A R K   //   AGENT WORKLOAD RECEIPT                           │
+│  BENCHMARKS LOCAL AI HOW CODING AGENTS ACTUALLY USE IT                 │
+│  ●  15/15 BASIC OUTPUT GATES PASSED                                    │
+├─ MODEL ────────────────────────────────────────────────────────────────┤
+│  glm-5.3-flash                                                         │
+├─ SINGLE STREAM ────────────────────────────────────────────────────────┤
+│  WORKLOAD         tok/s       Range tok/s   Last (s)    Checks         │
+│  CODE             108.9       105.2–110.8       17.7     ✓ 5/5         │
+│  PROSE             57.4         57.1–59.2       17.3     ✓ 5/5         │
+│  STRUCTURED*      153.6       151.7–154.8        4.9     ✓ 5/5         │
+│  * Predictable JSON ceiling; not general agent performance.            │
+│  Decode medians are estimates; rates include streamed reasoning.       │
+├─ PREFILL ──────────────────────────────────────────────────────────────┤
+│  DEPTH       Cold tok/s      Cold TTFT (s)    Replay TTFT (s)          │
+│  8K               2,247               3.65               0.14          │
+│  32K              2,321              14.12               0.14          │
+│  64K              2,242              29.23               0.17          │
+│  Medians; replay is an immediate repeat, not a proven hit.             │
+├─ CAPPED CONCURRENT GENERATION ─────────────────────────────────────────┤
+│  Aggregate tok/s: C1 72.4 | C2 104.8 | C4 141.4                        │
+│  C4: 0/12 normal stops; 12/12 with visible output.                     │
+│  Capped throughput includes reasoning; not completed agent tasks.      │
+├─ APPLIANCE ────────────────────────────────────────────────────────────┤
+│  Hardware: 4x NVIDIA DGX Spark (GB10); all four live ranks verified    │
+│    2026-10-06                                                          │
+│  Topology: TP4; switchless RoCE ring; NCCL ring communicator; four live│
+│    ranks verified                                                      │
+│  Checkpoint: Local GLM-5.3-Flash EXL3 4bpw TensorFold Ablit variant @  │
+│    ablit-o-proj                                                        │
+│  Quantisation: EXL3 4bpw checkpoint; dense q4 (verified from live      │
+│    container)                                                          │
+│  KV cache: fp8 (verified from live container)                          │
+│  Engine: TensorFold v0.6.0 + MiaAI patches, owner-ring, short-prompt   │
+│    priority patch 0072 v2                                              │
+├─ SETTINGS ─────────────────────────────────────────────────────────────┤
+│  SUITE: DEFAULT SETTINGS                                               │
+│  REQUEST: {"chat_template_kwargs": {"reasoning_effort": "low"}}        │
+│  Temperature 0.0 | top_p 1.0 | seed 20260905 | protocol 1.3.0          │
+│  Decode: 5 runs, 8192-token cap | Prefill: 8K/32K/64K, 3 pairs         │
+│  Concurrency: C1/C2/C4, 3 rounds, 256-token cap; workload code         │
+│  Cache isolation: random-salt-per-pair                                 │
+│  Comparison ID: spark-glm53-20261004                                   │
+├─ RECEIPT ──────────────────────────────────────────────────────────────┤
+│  SOURCE     git:68800bf29cf1  •  state unknown                         │
+│  JSON sha256:53ccb0bb5043b373…                                         │
+│  SHARE THE CARD • LINK THE JSON RECEIPT • #RIGMARK                     │
+│  github.com/alexellis/rigmark                                          │
+╰────────────────────────────────────────────────────────────────────────╯

@@ -26,6 +26,8 @@ The measured site's subsequent [four-HCA RigMark A/B](4hca-rigmark-20261005/READ
 
 For this same measured site, [mixed-load tuning](fill-budget-20261006/README.md) kept the single-direction owner-row route and raised `TF_GLM_FILL_ROWS` from 1024 to 2048 in the head's untracked `scripts/local.sh`. With three decodes active, 32K/64K cold prefill TTFT improved by about 10% in three matched trials per depth; decode SSE-gap p95 rose by 2.5–3.1 ms. The generic default remains 1024 rows for other sites.
 
+An opt-in [short-prompt admission patch](short-prompt-priority-20261006/README.md) prioritizes a later short prompt at the next chunk boundary when a long prompt is filling. On the measured site it reduced the short request's mixed-load first-token median from 10.24 to 3.77 seconds, while C4 short-only aggregate throughput remained within 2%. It cannot interrupt the current 8192-row forward; `SHORT_PROMPT_ROWS=0` preserves the old scheduler.
+
 ## Prepare a site
 
 1. Put the same patched NCCL `libnccl.so.2` on all four machines. The library from a proven four-Spark switchless vLLM deployment can be reused; the launcher checks its SHA256 on every rank.

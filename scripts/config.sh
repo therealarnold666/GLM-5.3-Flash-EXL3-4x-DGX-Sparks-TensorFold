@@ -227,6 +227,11 @@ export TF_GLM_STREAM_SMOOTH="$STREAM_SMOOTH" TF_GLM_STREAM_SMOOTH_MS="$STREAM_SM
 FILL_BUDGET_MS="${FILL_BUDGET_MS:-200}"
 FILL_DRAFTS="${FILL_DRAFTS:-1}"
 export TF_GLM_FILL_BUDGET_MS="$FILL_BUDGET_MS" TF_GLM_FILL_DRAFTS="$FILL_DRAFTS"
+# Opt-in short-prompt priority at a prefill chunk boundary (patch 0072). A later prompt whose remaining rows fit
+# this threshold runs alone before the older long prompt's next grouped forward. 0 preserves FIFO/grouped filling.
+# The currently executing prefill chunk is not interrupted. Set on every rank through this shared launcher.
+SHORT_PROMPT_ROWS="${SHORT_PROMPT_ROWS:-0}"
+export TF_GLM_SHORT_PROMPT_ROWS="$SHORT_PROMPT_ROWS"
 # L2 prefetch in decode windows (patch 0046, adapted from jayleaton/glm53-tensorfold-spark's patch 0460): a side stream
 # brings the weights the next kernels read into L2 during each layer's all-gathers. 1 (default): one request's prose
 # 48.36 -> 49.46 tok/s, code 59.54 -> 61.08 (two boots each). Same bits. 0: off.

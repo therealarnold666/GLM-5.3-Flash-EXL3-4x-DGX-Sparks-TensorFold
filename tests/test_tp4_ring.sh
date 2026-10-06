@@ -57,6 +57,12 @@ cp scripts/config.sh "$tmp_cfg/scripts/config.sh"
   [[ "$MEMORY_RESERVE_GIB" == 20 && "$KV_POOL_GIB" == 24 && "$SPLIT" == 0 ]]
   [[ "$TF_GLM_HC_EXCHANGE" == gather && "$TF_GLM_PREFILL_OVERLAP" == 0 ]]
   [[ "$STATE_DIR" == "$HOME/.local/state/glm53-tensorfold-tp4" ]]
+  [[ "$TF_GLM_SHORT_PROMPT_ROWS" == 0 ]]
+)
+(
+  SHORT_PROMPT_ROWS=512
+  source "$tmp_cfg/scripts/config.sh"
+  [[ "$TF_GLM_SHORT_PROMPT_ROWS" == 512 ]]
 )
 (
   SPLIT=1
