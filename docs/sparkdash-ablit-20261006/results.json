@@ -1,0 +1,648 @@
+{
+  "startedAt": "2026-10-06T07:24:32.242Z",
+  "harness": {
+    "name": "sparkDash",
+    "version": "1.8.8",
+    "sourceCommit": "754f40a"
+  },
+  "target": {
+    "url": "http://127.0.0.1:18890",
+    "via": "SSH tunnel to head 127.0.0.1:8890",
+    "model": "glm-5.3-flash"
+  },
+  "protocol": {
+    "temperature": 0,
+    "topP": 1,
+    "thinking": false,
+    "decodeMaxTokens": 400,
+    "concurrencies": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "contextSizes": [
+      8192,
+      16384,
+      32768,
+      65536,
+      131072,
+      262144
+    ]
+  },
+  "jobs": {
+    "prose": {
+      "benchId": "e6ea9fdb-06e7-4eff-b56e-d5ff1e63a67c",
+      "sparkId": "tp4-prose",
+      "status": "completed",
+      "startedAt": 1791271472243,
+      "completedAt": 1791271505557,
+      "config": {
+        "port": 18890,
+        "modelId": "glm-5.3-flash",
+        "concurrencies": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "maxTokens": 400,
+        "promptType": "prose",
+        "host": "127.0.0.1",
+        "tls": false
+      },
+      "progress": {
+        "currentConcurrency": null,
+        "completedLevels": 4,
+        "totalLevels": 4,
+        "message": "Done"
+      },
+      "results": [
+        {
+          "concurrency": 1,
+          "streamsOk": 1,
+          "streamsFailed": 0,
+          "meanDecodeTps": 82.17,
+          "medianDecodeTps": 82.17,
+          "minDecodeTps": 82.17,
+          "maxDecodeTps": 82.17,
+          "meanTtftMs": 136.42,
+          "medianTtftMs": 136.42,
+          "aggregateDecodeTps": 82.17,
+          "meanPrefillTps": 241.91,
+          "medianPrefillTps": 241.91,
+          "aggregatePrefillTps": 241.91,
+          "totalPrefillTokens": 33,
+          "totalDecodeTokens": 399,
+          "totalCompletionTokens": 400,
+          "durationMs": 4995.39,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 136.42,
+              "reasoningChunks": 0,
+              "ttftMs": 136.42,
+              "decodeTps": 82.17,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 241.91,
+              "prefillTokens": 33,
+              "totalMs": 4993.13,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 2,
+          "streamsOk": 2,
+          "streamsFailed": 0,
+          "meanDecodeTps": 52.77,
+          "medianDecodeTps": 52.77,
+          "minDecodeTps": 51.98,
+          "maxDecodeTps": 53.56,
+          "meanTtftMs": 208.3,
+          "medianTtftMs": 208.3,
+          "aggregateDecodeTps": 103.87,
+          "meanPrefillTps": 192.06,
+          "medianPrefillTps": 192.06,
+          "aggregatePrefillTps": 375.58,
+          "totalPrefillTokens": 80,
+          "totalDecodeTokens": 798,
+          "totalCompletionTokens": 800,
+          "durationMs": 7892.57,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 205.98,
+              "reasoningChunks": 0,
+              "ttftMs": 205.98,
+              "decodeTps": 53.56,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 194.19,
+              "prefillTokens": 40,
+              "totalMs": 7663.75,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 210.61,
+              "reasoningChunks": 0,
+              "ttftMs": 210.61,
+              "decodeTps": 51.98,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 189.93,
+              "prefillTokens": 40,
+              "totalMs": 7889.31,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 3,
+          "streamsOk": 3,
+          "streamsFailed": 0,
+          "meanDecodeTps": 46.56,
+          "medianDecodeTps": 45.84,
+          "minDecodeTps": 45.47,
+          "maxDecodeTps": 48.38,
+          "meanTtftMs": 227.62,
+          "medianTtftMs": 227.13,
+          "aggregateDecodeTps": 136.32,
+          "meanPrefillTps": 175.76,
+          "medianPrefillTps": 176.11,
+          "aggregatePrefillTps": 514.15,
+          "totalPrefillTokens": 120,
+          "totalDecodeTokens": 1197,
+          "totalCompletionTokens": 1200,
+          "durationMs": 9009.69,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 227.13,
+              "reasoningChunks": 0,
+              "ttftMs": 227.13,
+              "decodeTps": 45.84,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 176.11,
+              "prefillTokens": 40,
+              "totalMs": 8935.41,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 231.48,
+              "reasoningChunks": 0,
+              "ttftMs": 231.48,
+              "decodeTps": 45.47,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 172.8,
+              "prefillTokens": 40,
+              "totalMs": 9006.84,
+              "error": null
+            },
+            {
+              "index": 2,
+              "ttftContentMs": 224.26,
+              "reasoningChunks": 0,
+              "ttftMs": 224.26,
+              "decodeTps": 48.38,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 178.36,
+              "prefillTokens": 40,
+              "totalMs": 8474.52,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 4,
+          "streamsOk": 4,
+          "streamsFailed": 0,
+          "meanDecodeTps": 38.38,
+          "medianDecodeTps": 38.14,
+          "minDecodeTps": 37.46,
+          "maxDecodeTps": 39.76,
+          "meanTtftMs": 307.8,
+          "medianTtftMs": 309.3,
+          "aggregateDecodeTps": 149.83,
+          "meanPrefillTps": 141.3,
+          "medianPrefillTps": 139.66,
+          "aggregatePrefillTps": 397.99,
+          "totalPrefillTokens": 160,
+          "totalDecodeTokens": 1596,
+          "totalCompletionTokens": 1600,
+          "durationMs": 10872,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 225.16,
+              "reasoningChunks": 0,
+              "ttftMs": 225.16,
+              "decodeTps": 37.72,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 177.65,
+              "prefillTokens": 40,
+              "totalMs": 10803.31,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 216.27,
+              "reasoningChunks": 0,
+              "ttftMs": 216.27,
+              "decodeTps": 37.46,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 184.95,
+              "prefillTokens": 40,
+              "totalMs": 10869.45,
+              "error": null
+            },
+            {
+              "index": 2,
+              "ttftContentMs": 393.43,
+              "reasoningChunks": 0,
+              "ttftMs": 393.43,
+              "decodeTps": 38.56,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 101.67,
+              "prefillTokens": 40,
+              "totalMs": 10746,
+              "error": null
+            },
+            {
+              "index": 3,
+              "ttftContentMs": 396.32,
+              "reasoningChunks": 0,
+              "ttftMs": 396.32,
+              "decodeTps": 39.76,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 100.93,
+              "prefillTokens": 40,
+              "totalMs": 10431.89,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        }
+      ],
+      "error": null,
+      "durationMs": 33314,
+      "owner": null
+    },
+    "code": {
+      "benchId": "ee9bd425-d2e7-4bc5-b8ef-d08ec978bcc7",
+      "sparkId": "tp4-code",
+      "status": "completed",
+      "startedAt": 1791271506258,
+      "completedAt": 1791271530435,
+      "config": {
+        "port": 18890,
+        "modelId": "glm-5.3-flash",
+        "concurrencies": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "maxTokens": 400,
+        "promptType": "code",
+        "host": "127.0.0.1",
+        "tls": false
+      },
+      "progress": {
+        "currentConcurrency": null,
+        "completedLevels": 4,
+        "totalLevels": 4,
+        "message": "Done"
+      },
+      "results": [
+        {
+          "concurrency": 1,
+          "streamsOk": 1,
+          "streamsFailed": 0,
+          "meanDecodeTps": 123.81,
+          "medianDecodeTps": 123.81,
+          "minDecodeTps": 123.81,
+          "maxDecodeTps": 123.81,
+          "meanTtftMs": 209.34,
+          "medianTtftMs": 209.34,
+          "aggregateDecodeTps": 123.81,
+          "meanPrefillTps": 286.61,
+          "medianPrefillTps": 286.61,
+          "aggregatePrefillTps": 286.61,
+          "totalPrefillTokens": 60,
+          "totalDecodeTokens": 399,
+          "totalCompletionTokens": 400,
+          "durationMs": 3436.07,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 209.34,
+              "reasoningChunks": 0,
+              "ttftMs": 209.34,
+              "decodeTps": 123.81,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 286.61,
+              "prefillTokens": 60,
+              "totalMs": 3435.65,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 2,
+          "streamsOk": 2,
+          "streamsFailed": 0,
+          "meanDecodeTps": 82.73,
+          "medianDecodeTps": 82.73,
+          "minDecodeTps": 80.9,
+          "maxDecodeTps": 84.55,
+          "meanTtftMs": 243.27,
+          "medianTtftMs": 243.27,
+          "aggregateDecodeTps": 161.81,
+          "meanPrefillTps": 244.59,
+          "medianPrefillTps": 244.59,
+          "aggregatePrefillTps": 484.85,
+          "totalPrefillTokens": 119,
+          "totalDecodeTokens": 798,
+          "totalCompletionTokens": 800,
+          "durationMs": 5174.27,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 245.44,
+              "reasoningChunks": 0,
+              "ttftMs": 245.44,
+              "decodeTps": 84.55,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 244.46,
+              "prefillTokens": 60,
+              "totalMs": 4970.5,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 241.09,
+              "reasoningChunks": 0,
+              "ttftMs": 241.09,
+              "decodeTps": 80.9,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 244.72,
+              "prefillTokens": 59,
+              "totalMs": 5173.49,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 3,
+          "streamsOk": 3,
+          "streamsFailed": 0,
+          "meanDecodeTps": 63.86,
+          "medianDecodeTps": 63.75,
+          "minDecodeTps": 63.13,
+          "maxDecodeTps": 64.69,
+          "meanTtftMs": 356.63,
+          "medianTtftMs": 406.08,
+          "aggregateDecodeTps": 185.01,
+          "meanPrefillTps": 180.26,
+          "medianPrefillTps": 162.53,
+          "aggregatePrefillTps": 454.29,
+          "totalPrefillTokens": 185,
+          "totalDecodeTokens": 1197,
+          "totalCompletionTokens": 1200,
+          "durationMs": 6728.41,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 257.44,
+              "reasoningChunks": 0,
+              "ttftMs": 257.44,
+              "decodeTps": 63.75,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 233.07,
+              "prefillTokens": 60,
+              "totalMs": 6520.04,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 406.36,
+              "reasoningChunks": 0,
+              "ttftMs": 406.36,
+              "decodeTps": 63.13,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 145.19,
+              "prefillTokens": 59,
+              "totalMs": 6727.31,
+              "error": null
+            },
+            {
+              "index": 2,
+              "ttftContentMs": 406.08,
+              "reasoningChunks": 0,
+              "ttftMs": 406.08,
+              "decodeTps": 64.69,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 162.53,
+              "prefillTokens": 66,
+              "totalMs": 6576.31,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        },
+        {
+          "concurrency": 4,
+          "streamsOk": 4,
+          "streamsFailed": 0,
+          "meanDecodeTps": 54.43,
+          "medianDecodeTps": 55.33,
+          "minDecodeTps": 50.16,
+          "maxDecodeTps": 56.91,
+          "meanTtftMs": 293.58,
+          "medianTtftMs": 294.12,
+          "aggregateDecodeTps": 200.53,
+          "meanPrefillTps": 207.78,
+          "medianPrefillTps": 203.21,
+          "aggregatePrefillTps": 825.87,
+          "totalPrefillTokens": 244,
+          "totalDecodeTokens": 1596,
+          "totalCompletionTokens": 1600,
+          "durationMs": 8253.22,
+          "error": null,
+          "streams": [
+            {
+              "index": 0,
+              "ttftContentMs": 291.62,
+              "reasoningChunks": 0,
+              "ttftMs": 291.62,
+              "decodeTps": 56.91,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 205.75,
+              "prefillTokens": 60,
+              "totalMs": 7303.36,
+              "error": null
+            },
+            {
+              "index": 1,
+              "ttftContentMs": 294.46,
+              "reasoningChunks": 0,
+              "ttftMs": 294.46,
+              "decodeTps": 54.43,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 200.37,
+              "prefillTokens": 59,
+              "totalMs": 7625.55,
+              "error": null
+            },
+            {
+              "index": 2,
+              "ttftContentMs": 294.23,
+              "reasoningChunks": 0,
+              "ttftMs": 294.23,
+              "decodeTps": 56.23,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 224.32,
+              "prefillTokens": 66,
+              "totalMs": 7396.23,
+              "error": null
+            },
+            {
+              "index": 3,
+              "ttftContentMs": 294.01,
+              "reasoningChunks": 0,
+              "ttftMs": 294.01,
+              "decodeTps": 50.16,
+              "decodeTokens": 399,
+              "completionTokens": 400,
+              "prefillTps": 200.67,
+              "prefillTokens": 59,
+              "totalMs": 8251.4,
+              "error": null
+            }
+          ],
+          "model": "glm-5.3-flash"
+        }
+      ],
+      "error": null,
+      "durationMs": 24177,
+      "owner": null
+    },
+    "prefill": {
+      "benchId": "e3358e81-a148-430b-8325-5ced6d0c11ed",
+      "sparkId": "tp4-prefill",
+      "status": "completed",
+      "startedAt": 1791271531274,
+      "completedAt": 1791271790109,
+      "config": {
+        "port": 18890,
+        "modelId": "glm-5.3-flash",
+        "contextSizes": [
+          8192,
+          16384,
+          32768,
+          65536,
+          131072,
+          262144
+        ],
+        "host": "127.0.0.1",
+        "tls": false
+      },
+      "progress": {
+        "currentContext": null,
+        "completedLevels": 6,
+        "totalLevels": 6,
+        "message": "Done"
+      },
+      "results": [
+        {
+          "targetTokens": 8192,
+          "promptTokens": 8216,
+          "promptChars": 32767,
+          "prefillTps": 2167.77,
+          "ttftMs": 3790.06,
+          "ttftContentMs": 3790.06,
+          "completionTokens": 2,
+          "durationMs": 3828.46,
+          "model": "glm-5.3-flash",
+          "error": null
+        },
+        {
+          "targetTokens": 16384,
+          "promptTokens": 16411,
+          "promptChars": 65535,
+          "prefillTps": 2296.42,
+          "ttftMs": 7146.35,
+          "ttftContentMs": 7146.35,
+          "completionTokens": 2,
+          "durationMs": 7223.44,
+          "model": "glm-5.3-flash",
+          "error": null
+        },
+        {
+          "targetTokens": 32768,
+          "promptTokens": 32795,
+          "promptChars": 131071,
+          "prefillTps": 2339.1,
+          "ttftMs": 14020.34,
+          "ttftContentMs": 14020.34,
+          "completionTokens": 2,
+          "durationMs": 14122.9,
+          "model": "glm-5.3-flash",
+          "error": null
+        },
+        {
+          "targetTokens": 65536,
+          "promptTokens": 65560,
+          "promptChars": 262143,
+          "prefillTps": 2280.66,
+          "ttftMs": 28746.09,
+          "ttftContentMs": 28746.09,
+          "completionTokens": 2,
+          "durationMs": 28787.46,
+          "model": "glm-5.3-flash",
+          "error": null
+        },
+        {
+          "targetTokens": 131072,
+          "promptTokens": 131097,
+          "promptChars": 524287,
+          "prefillTps": 2123.17,
+          "ttftMs": 61745.89,
+          "ttftContentMs": 61745.89,
+          "completionTokens": 2,
+          "durationMs": 61790.51,
+          "model": "glm-5.3-flash",
+          "error": null
+        },
+        {
+          "targetTokens": 262144,
+          "promptTokens": 262171,
+          "promptChars": 1048575,
+          "prefillTps": 1840.19,
+          "ttftMs": 142469.76,
+          "ttftContentMs": 142469.76,
+          "completionTokens": 2,
+          "durationMs": 142516.99,
+          "model": "glm-5.3-flash",
+          "error": null
+        }
+      ],
+      "error": null,
+      "durationMs": 258835,
+      "owner": null
+    }
+  },
+  "completedAt": "2026-10-06T07:29:50.536Z"
+}

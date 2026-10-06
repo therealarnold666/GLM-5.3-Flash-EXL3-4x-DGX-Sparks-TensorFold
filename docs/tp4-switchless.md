@@ -1,10 +1,12 @@
 # TensorFold GLM-5.3 Flash on four switchless DGX Sparks
 
-This fork adds a **four-rank, one-model TensorFold** launch path to MiaAI's GLM-5.3 Flash recipe. It uses the existing TP-N model patches 0066–0068, four direct CX7 links in a cycle, and a pinned switchless NCCL build. It does not use vLLM in the serving path.
+This repository targets a **four-rank, one-model TensorFold** deployment on a switchless DGX Spark ring. It builds on Mia AI's GLM-5.3 Flash recipe and TP-N model patches 0066–0068, with four direct CX7 links in a cycle and a matching switchless NCCL build. It does not use vLLM in the serving path.
 
 ## Status
 
-The TP4 model code is supplied by MiaAI's 0066–0068 patches. This fork adds the four-rank launcher, topology validation and patched NCCL ring settings. Patch 0071 adds an opt-in owner-row FP32 exchange on the physical ring. Its isolated 8192-row communication benchmark is recorded in [the microbenchmark](ring-row-exchange-20261005/README.md); that measurement is not an end-to-end serving result. The published two- and three-Spark numbers below use different deployments.
+The TP4 model code is supplied by Mia AI's 0066–0068 patches. This fork adds the four-rank launcher, topology validation and patched NCCL ring settings. Patch 0071 adds an opt-in owner-row FP32 exchange on the physical ring. Its isolated 8192-row communication benchmark is recorded in [the microbenchmark](ring-row-exchange-20261005/README.md); that measurement is not an end-to-end serving result.
+
+An end-to-end four-Spark [sparkDash run](sparkdash-ablit-20261006/README.md) now reports C1–C4 decode and 8K–256K cold prefill. It used a locally built image and Ablit checkpoint, so the measurements do not describe the conservative checkout defaults or isolate the value of a fourth Spark.
 
 ## Physical layout
 
@@ -76,7 +78,7 @@ Defaults for the first validation run: `CONTEXT=1048576`, `PARALLEL=4`, `KV=fp8`
 
 ## Validation before production use
 
-Use the same checkpoint and prompts on MiaAI TP2 and this TP4 path. First confirm one greedy completion, DFlash2 drafted-versus-serial equality, API tools and image requests. Then measure:
+First confirm one greedy completion, DFlash2 drafted-versus-serial equality, API tools and image requests. For a comparison against another deployment, use the same checkpoint and prompts in both runs. Then measure:
 
 - 8K, 32K and 128K cold prefill and time to first token;
 - single-stream prose and code decode at 32K context;
@@ -84,16 +86,14 @@ Use the same checkpoint and prompts on MiaAI TP2 and this TP4 path. First confir
 - `/health` pool tokens and minimum free memory on each rank under a long prompt;
 - a 195K needle and a 1M-token needle, followed by a sustained mixed-workload run.
 
-Record the model revision, image hash, NCCL SHA, GPU clocks, context, sampling policy and both per-request and aggregate throughput. Run TP2 and TP4 in separate windows because both use the same four GPUs.
+Record the model revision, image hash, NCCL SHA, GPU clocks, context, sampling policy and both per-request and aggregate throughput. Run other deployments and TP4 in separate windows when they share GPUs.
 
-## What four Sparks may improve
+## Measured performance and limits
 
-MiaAI reports 60.4 prose / 114.7 code tokens/s for one request and 108.8 prose / 227.9 code tokens/s for four requests on TP2. Its TP3 measurements are 77.6 / 104.3 for one request and 146.2 / 169.6 for four. The third Spark improved prose and total prose throughput, while code slowed in those tests. Cold prefill at 32K stayed near 2,000 tokens/s on both layouts.
+On the measured four-Spark site, [sparkDash](sparkdash-ablit-20261006/README.md) reported 149.8 prose and 200.5 code aggregate tok/s at four concurrent requests, and 2,339 / 2,281 tok/s cold prefill at 32K / 64K. These figures used an Ablit checkpoint, local image, FP8 KV, DFlash2, split owner-row exchange, and a four-HCA ring. Each point was measured once. Mia AI's published three-Spark results used a different checkpoint and deployment; the comparison cannot assign a gain to the extra Spark alone.
 
-TP4 divides the same weights among four ranks, leaving more memory per Spark for a shared KV pool and multiple long conversations. That is its clearest expected advantage. A larger pool can reduce queuing or eviction when several long agent sessions run together. Single-request decode and cold prefill may improve, stay flat or regress: every layer communicates across more ranks, and the ring has less cross-section bandwidth than a full mesh. No TP4 speed multiplier is claimed until matched measurements exist.
-
-The checkpoint, quantization, model behavior and per-request maximum context are unchanged. TP2 already offers the model's 1M-token window; TP4's likely context benefit is **more simultaneous long sessions**, subject to measured memory headroom.
+TP4 partitions the weights across four ranks and can leave more memory per Spark for a shared KV pool and multiple long conversations. Communication across four ranks can also add latency. The per-request context limit is still the model's 1,048,576 tokens; any multi-session capacity benefit depends on actual free memory and workload. Mixed prefill/decode, eight concurrent requests, long-term stability, and response quality were not measured in the sparkDash run.
 
 ## Rollback
 
-`./start-tp4.sh stop` stops this fork's four TensorFold containers. Restore the previous vLLM service with its existing systemd unit or launcher, then check its `/health` and one completion. This deployment uses port 8890 for the model API; the existing port 8888 console gateway forwards to it. The TensorFold fork does not alter the vLLM image, weights or systemd unit.
+`./start-tp4.sh stop` stops this fork's four TensorFold containers. If replacing another inference service, restore that service with its existing unit or launcher, then check its `/health` and one completion. This deployment uses port 8890 by default for the model API; configure any separate gateway to forward to that port. The TensorFold fork does not alter other images, weights, or systemd units.
